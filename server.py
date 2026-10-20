@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 PORT = int(os.environ.get("PORT", 8765))
 HERE = Path(__file__).parent
-CONFIG = Path(os.environ.get("PUDU_CONFIG") or Path.home() / ".config" / "pudu" / "config.json")
+CONFIG = Path(os.environ.get("PUDU_CONFIG") or Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "pudu" / "config.json")
 # why: several open tabs share one gh call instead of each burning GraphQL rate limit.
 CACHE_SECONDS = 20
 # why: a held-down refresh key or a looping script can't turn force=1 into a gh call per request.
@@ -26,7 +27,7 @@ QUERY = """
 query($q: String!, $n: Int!, $requested: Boolean!) {
   viewer { login avatarUrl }
   rateLimit { cost remaining resetAt }
-  search(query: $q, type: ISSUE, first: $n) { nodes { ...pr } }
+  search(query: $q, type: ISSUE, first: $n) { issueCount nodes { ...pr } }
 }
 fragment pr on PullRequest {
   number title url isDraft createdAt updatedAt mergedAt additions deletions changedFiles
@@ -55,16 +56,20 @@ EMPTY = {
   "review": {"humans": [], "bots": []},
   "mine": {"returned": [], "approved": [], "waiting": [], "draft": []},
   "merged": [],
+  "truncated": {},
 }
 
+# why: readers wait on a running fetch instead of starting their own; that wait is what dedupes gh calls.
 _lock = threading.Lock()
+_config_lock = threading.Lock()
 _cache = {"at": 0.0, "data": None, "error": None}
 
 
-def gh(*args):
+def gh(*args, partial=False):
   out = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=60)
-  if out.returncode:
-    raise RuntimeError(out.stderr.strip() or "gh falló")
+  # why: `gh api graphql` exits 1 on partial GraphQL errors while still printing usable data.
+  if out.returncode and not (partial and out.stdout.strip()):
+    raise RuntimeError(out.stderr.strip() or "gh failed")
   return out.stdout
 
 
@@ -226,9 +231,13 @@ def inbox_md(d, only=()):
 
 
 def search(q, n, requested=False):
-  return json.loads(gh(
+  out = json.loads(gh(
     "api", "graphql", "-f", f"query={QUERY}", "-f", f"q={q}", "-F", f"n={n}", "-F", f"requested={str(requested).lower()}",
-  ))["data"]
+    partial=True,
+  ))
+  if not out.get("data"):
+    raise RuntimeError("; ".join(str(e.get("message", e)) for e in out.get("errors") or []) or "gh returned no data")
+  return out["data"]
 
 
 def build(review_raw, mine_raw, merged_raw):
@@ -250,33 +259,56 @@ def build(review_raw, mine_raw, merged_raw):
     },
     "mine": {k: [p for p in mine if bucket(p) == k] for k in EMPTY["mine"]},
     "merged": desc(prs(merged_raw), "mergedAt"),
+    "truncated": {
+      k: dig(raw, "search", "issueCount") for k, raw in (("review", review_raw), ("mine", mine_raw), ("merged", merged_raw))
+      if (dig(raw, "search", "issueCount") or 0) > len(dig(raw, "search", "nodes") or [])
+    },
   }
 
 
 def fetch():
   base = "is:pr is:open archived:false"
-  since = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+  # why: GitHub reads merged:>=DATE in UTC; a local date would shift the window near midnight.
+  since = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
   # why: one combined query runs the three searches serially and hits GitHub's ~10s timeout (502);
   # three parallel calls finish in the time of the slowest.
   with ThreadPoolExecutor(3) as pool:
     jobs = [
-      pool.submit(search, f"{base} review-requested:@me", 100, True),
-      pool.submit(search, f"{base} author:@me", 100),
-      pool.submit(search, f"is:pr author:@me is:merged merged:>={since}", 20),
+      # why: when results overflow `first`, keep the freshest; search has no sort by merge date.
+      pool.submit(search, f"{base} review-requested:@me sort:updated-desc", 100, True),
+      pool.submit(search, f"{base} author:@me sort:updated-desc", 100),
+      pool.submit(search, f"is:pr author:@me is:merged merged:>={since} sort:updated-desc", 20),
     ]
     return build(*(j.result() for j in jobs))
 
 
-def hidden_repos():
+def read_config():
   try:
-    return {r for r in json.loads(CONFIG.read_text()).get("hidden", []) if isinstance(r, str)}
-  except (OSError, ValueError, AttributeError):
-    return set()
+    c = json.loads(CONFIG.read_text())
+  except (OSError, ValueError):
+    return {}
+  return c if isinstance(c, dict) else {}
+
+
+# why: read-modify-write keeps keys this version doesn't know; temp file + os.replace never leaves half a file.
+def update_config(change):
+  with _config_lock:
+    c = read_config()
+    change(c)
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=CONFIG.parent, prefix=".config.", suffix=".tmp")
+    with os.fdopen(fd, "w") as f:
+      f.write(json.dumps(c, indent=2) + "\n")
+    os.replace(tmp, CONFIG)
+
+
+def hidden_repos():
+  h = read_config().get("hidden")
+  return {r for r in h if isinstance(r, str)} if isinstance(h, list) else set()
 
 
 def save_hidden(repos):
-  CONFIG.parent.mkdir(parents=True, exist_ok=True)
-  CONFIG.write_text(json.dumps({"hidden": sorted(repos)}, indent=2) + "\n")
+  update_config(lambda c: c.update(hidden=sorted(repos)))
 
 
 LISTS = [("review", "humans"), ("review", "bots"), *(("mine", k) for k in EMPTY["mine"]), ("merged",)]
