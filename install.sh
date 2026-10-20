@@ -17,12 +17,16 @@ xml() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
 sd() { printf '%s' "$1" | sed 's/[\\"]/\\&/g; s/%/%%/g'; }
 
 [[ "$PORT" =~ ^[0-9]+$ ]] || die "PORT must be a number, got '$PORT'"
+# why: settings given at install time must reach the service, which doesn't inherit this shell's environment.
+PASS=(PORT="$PORT")
+for v in PUDU_CONFIG PUDU_LANG; do [[ -n "${!v:-}" ]] && PASS+=("$v=${!v}"); done
 
 # --- macOS: launchd ---
 
 LABEL="local.$NAME"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-APP="$HOME/Applications/Pudú.app"
+# why: a side-by-side copy gets its own launcher, so installing or uninstalling it never touches the main one.
+if [[ "$NAME" == pudu ]]; then APP="$HOME/Applications/Pudú.app"; else APP="$HOME/Applications/Pudú ($NAME).app"; fi
 LOG="$HOME/Library/Logs/$NAME.log"
 DOMAIN="gui/$(id -u)"
 
@@ -41,7 +45,7 @@ mac_plist() {
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>$(xml "$SVC_PATH")</string>
-    <key>PORT</key><string>$PORT</string>
+$(for kv in "${PASS[@]}"; do printf '    <key>%s</key><string>%s</string>\n' "${kv%%=*}" "$(xml "${kv#*=}")"; done)
     <key>PYTHONUNBUFFERED</key><string>1</string>
   </dict>
   <key>RunAtLoad</key><true/>
@@ -113,7 +117,7 @@ Description=Pudú, a local GitHub PR inbox
 [Service]
 ExecStart="$(sd "$PY")" "$(sd "$DIR/server.py")"
 Environment=PYTHONUNBUFFERED=1
-Environment=PORT=$PORT
+$(for kv in "${PASS[@]}"; do printf 'Environment="%s"\n' "$(sd "$kv")"; done)
 Environment="PATH=$(sd "$SVC_PATH")"
 Restart=always
 RestartSec=2

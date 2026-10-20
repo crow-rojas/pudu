@@ -136,9 +136,9 @@ Environment variables:
 | `XDG_CONFIG_HOME` | `~/.config` | Base directory for the default config path. |
 | `PUDU_LANG` | `en` | Default language (`en` or `es`) of the markdown and the MCP tools. `?lang=` overrides it per request. |
 | `PUDU_DEMO` | unset | `1` serves fixture data without `gh`, like `--demo`. |
-| `PUDU_NAME` | `pudu` | `install.sh` only: service name, so a second copy can be installed side by side. |
+| `PUDU_NAME` | `pudu` | `install.sh` only: service name, so a second copy can be installed side by side (its app is `Pudú (<name>).app`). |
 
-The installed service gets only `PORT`. To pass anything else, edit the launchd plist (`~/Library/LaunchAgents/local.pudu.plist`) or the systemd unit (`~/.config/systemd/user/pudu.service`).
+`install.sh` passes `PORT`, `PUDU_CONFIG` and `PUDU_LANG` to the installed service when they're set, e.g. `PUDU_LANG=es ./install.sh`.
 
 ## Using it with agents
 
