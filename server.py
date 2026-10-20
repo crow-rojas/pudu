@@ -343,6 +343,7 @@ def config_account(c):
 
 
 # why: no account in config means gh's own active account, untouched; a chosen one runs gh as that account.
+# why: gh reads GH_TOKEN only for github.com/ghe.com and GH_ENTERPRISE_TOKEN only for Enterprise Server hosts.
 def gh_env():
   a = config_account(read_config())
   if not a:
@@ -350,7 +351,7 @@ def gh_env():
   k = (a["host"], a["user"])
   if k not in _tokens:
     _tokens[k] = gh("auth", "token", "--hostname", a["host"], "--user", a["user"]).strip()
-  return {**os.environ, "GH_HOST": a["host"], "GH_TOKEN": _tokens[k]}
+  return {**os.environ, "GH_HOST": a["host"], "GH_TOKEN": _tokens[k], "GH_ENTERPRISE_TOKEN": _tokens[k]}
 
 
 def gh_accounts():
@@ -1194,7 +1195,7 @@ def selftest():
     update_config(lambda c: c.update(account={"host": "ghe.x", "user": "w"}))
     search("q", 1), search("q", 1)
     assert [a[1:] for a in argv[1:] if a[1] == "auth"] == [["auth", "token", "--hostname", "ghe.x", "--user", "w"]]
-    assert [(e["GH_HOST"], e["GH_TOKEN"]) for e in envs[2:]] == [("ghe.x", "tok-123")] * 2
+    assert [(e["GH_HOST"], e["GH_TOKEN"], e["GH_ENTERPRISE_TOKEN"]) for e in envs[2:]] == [("ghe.x", "tok-123", "tok-123")] * 2
     CONFIG.write_text("{}")
     _tokens.clear()
   finally:
