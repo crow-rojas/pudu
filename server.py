@@ -759,7 +759,8 @@ def selftest():
     assert req("POST", "/api/hidden", post, Content_Type="application/json", Host="evil.com")[0] == 403
     assert req("POST", "/api/hidden", post, Content_Type="application/json", Sec_Fetch_Site="cross-site")[0] == 403
     for n in ("-1", "abc", str(MAX_BODY + 1)):
-      assert req("POST", "/api/hidden", "{}", Content_Type="application/json", Content_Length=n)[0] == 400, n
+      # why: no body — the server can't know how much to read, so unread bytes would turn its close into a flaky RST.
+      assert req("POST", "/api/hidden", Content_Type="application/json", Content_Length=n)[0] == 400, n
     assert req("POST", "/api/hidden", json.dumps({"hidden": [1]}), Content_Type="application/json")[0] == 400
     assert json.loads(CONFIG.read_text()) == {"hidden": ["x/y"], "future": {"keep": 1}}
     code, body = req("POST", "/api/hidden", post, Content_Type="application/json")
