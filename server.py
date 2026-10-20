@@ -656,6 +656,123 @@ def selftest():
   md = inbox_md(view(out, set()))
   assert md.startswith("# PRs for @me\n\n## Needs your review (2)\n\n- t (o/r#2)") and "## Needs your attention (1)\n\n- t (o/r#8)" in md
   assert "## Merged this week (2)" in md and "merged " in md
+  assert out["truncated"] == {} and all(p["rereview"] is False for p in out["review"]["humans"])
+
+  # re-review: kept only when the head moved past my review, deduped, waiting since the head commit.
+  old = {"viewerLatestReview": {"commit": {"oid": "a"}}, "headRefOid": "b"}
+  head = lambda h: {"commits": {"nodes": [{"commit": {"committedDate": h}}]}}
+  n = lambda number, **kw: {**{k: v for k, v in human.items() if k != "timelineItems"}, "number": number, "url": f"u{number}", **kw}
+  rr = build(
+    raw(n(1, **old, timelineItems={"nodes": [{"createdAt": "T5", "requestedReviewer": {"login": "me"}}]})),
+    raw(), raw(),
+    {**raw(n(1, **old), n(10, **old, **head("T1")), n(11, **old, commits=None, updatedAt="T9"),
+           n(12, viewerLatestReview={"commit": {"oid": "b"}}, headRefOid="b"),
+           n(13, viewerLatestReview={"commit": None}, headRefOid="b", **head("T7"))),
+     "rateLimit": {"cost": 2, "remaining": 50, "resetAt": "R3"}},
+  )
+  assert [(p["number"], p["rereview"]) for p in rr["review"]["humans"]] == [(10, True), (1, True), (13, True), (11, True)]
+  assert rr["review"]["humans"][1]["requestedAt"] == "T5" and rr["rateLimit"]["remaining"] == 50
+  assert not slim({**human, "viewerLatestReview": None, "headRefOid": "b"})["rereview"]
+
+  # truncated: only searches whose issueCount exceeds the nodes returned.
+  big = lambda count, *ns: {**raw(*ns), "search": {"issueCount": count, "nodes": list(ns)}}
+  assert build(big(134, human), big(1, human), raw(), big(300))["truncated"] == {"review": 134, "rereview": 300}
+
+  # errorKind
+  for msg, kind in (
+    ("HTTP 401: Bad credentials (https://api.github.com/graphql)", "gh_auth"),
+    ("To get started with GitHub CLI, please run:  gh auth login", "gh_auth"),
+    ("GraphQL: API rate limit exceeded for user ID 1.", "rate_limit"),
+    ("HTTP 403: You have exceeded a secondary rate limit.", "rate_limit"),
+    ("error connecting to api.github.com", "network"), ("dial tcp: lookup api.github.com: no such host", "network"),
+    ("Something went wrong while executing your query.", "other"),
+  ):
+    assert error_kind(RuntimeError(msg)) == kind, msg
+  assert error_kind(FileNotFoundError(2, "No such file", "gh")) == "gh_missing"
+  assert error_kind(subprocess.TimeoutExpired("gh", 60)) == "network"
+
+  # search keeps partial data when gh exits 1, and raises with the GraphQL message when there's none.
+  real_run = subprocess.run
+  fake = lambda code, stdout, stderr="": setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, code, stdout, stderr))
+  try:
+    fake(1, json.dumps({"data": {"search": {"issueCount": 0, "nodes": [None]}}, "errors": [{"message": "x"}]}), "gh: x")
+    assert search("q", 1) == {"search": {"issueCount": 0, "nodes": [None]}}
+    for stdout, stderr, needle in (
+      (json.dumps({"data": None, "errors": [{"message": "Something went wrong"}]}), "", "Something went wrong"),
+      ("", "To get started with GitHub CLI, please run:  gh auth login", "gh auth login"),
+    ):
+      fake(1, stdout, stderr)
+      try:
+        search("q", 1)
+        assert False, "search should raise"
+      except RuntimeError as e:
+        assert needle in str(e)
+  finally:
+    subprocess.run = real_run
+
+  # demo goes through build() and covers every section.
+  demo = build(*demo_raws())
+  counts = {k: len(v) for k, v in [*demo["review"].items(), *demo["mine"].items(), ("merged", demo["merged"])]}
+  assert sum(counts.values()) == 15 and all(counts.values()) and demo["truncated"] == {}
+  assert [p["number"] for p in demo["review"]["humans"] if p["rereview"]] == [1271]
+  assert {p["repo"] for p in demo["mine"]["returned"] + demo["review"]["humans"]} >= {"acme/api", "acme/web", "octo-labs/infra"}
+
+  # HTTP: Host/Sec-Fetch-Site checks, body limits, force throttle, config preserving unknown keys.
+  import http.client
+  g = globals()
+  saved = {k: g[k] for k in ("CONFIG", "fetch")}
+  tmp = tempfile.mkdtemp()
+  g["CONFIG"] = Path(tmp) / "pudu" / "config.json"
+  CONFIG.parent.mkdir()
+  CONFIG.write_text(json.dumps({"hidden": ["x/y"], "future": {"keep": 1}}))
+  calls = []
+  g["fetch"] = lambda: (calls.append(1), out)[1]
+  _cache.update(at=0.0, data=None, error=None, errorKind=None)
+  srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+  port = srv.server_port
+  threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+  def req(method, path, body=None, **headers):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    c.request(method, path, body=body, headers={"Host": f"localhost:{port}", **{k.replace("_", "-"): v for k, v in headers.items()}})
+    r = c.getresponse()
+    return r.status, r.read()
+
+  try:
+    code, body = req("GET", "/api/data?lang=es")
+    d = json.loads(body)
+    assert code == 200 and d["errorKind"] is None and d["truncated"] == {} and calls == [1]
+    assert d["mine"]["approved"][0]["md"] == md_line(out["mine"]["approved"][0], "es")
+    assert req("GET", "/api/data")[0] == 200 and req("GET", "/api/data?force=1")[0] == 200 and calls == [1]
+    for host in (f"127.0.0.1:{port}", f"[::1]:{port}", f"LOCALHOST:{port}"):
+      assert req("GET", "/inbox.md", Host=host)[0] == 200, host
+    for host in (f"evil.com:{port}", "localhost:1", "localhost"):
+      assert req("GET", "/inbox.md", Host=host)[0] == 403, host
+    assert req("GET", "/inbox.md", Sec_Fetch_Site="cross-site")[0] == 403
+    assert req("GET", "/inbox.md", Sec_Fetch_Site="same-site")[0] == 403
+    assert req("GET", "/inbox.md", Sec_Fetch_Site="same-origin")[0] == 200
+    code, body = req("GET", "/inbox.md?lang=es&s=approved")
+    assert code == 200 and body.decode().startswith("# PRs de @me\n\nRepos ocultos: x/y.\n\n## Aprobados (1)")
+    assert req("GET", "/inbox.md?s=approved")[1].decode().startswith("# PRs for @me\n\nHidden repos: x/y.\n\n## Approved (1)")
+    post = json.dumps({"hidden": ["o/r"]})
+    assert req("POST", "/api/hidden", post, Content_Type="text/plain")[0] == 404
+    assert req("POST", "/api/hidden", post, Content_Type="application/json", Host="evil.com")[0] == 403
+    assert req("POST", "/api/hidden", post, Content_Type="application/json", Sec_Fetch_Site="cross-site")[0] == 403
+    for n in ("-1", "abc", str(MAX_BODY + 1)):
+      assert req("POST", "/api/hidden", "{}", Content_Type="application/json", Content_Length=n)[0] == 400, n
+    assert req("POST", "/api/hidden", json.dumps({"hidden": [1]}), Content_Type="application/json")[0] == 400
+    assert json.loads(CONFIG.read_text()) == {"hidden": ["x/y"], "future": {"keep": 1}}
+    code, body = req("POST", "/api/hidden", post, Content_Type="application/json")
+    assert code == 200 and json.loads(body)["mine"]["approved"] == []
+    assert json.loads(CONFIG.read_text()) == {"hidden": ["o/r"], "future": {"keep": 1}}
+    assert os.listdir(CONFIG.parent) == ["config.json"]
+    _cache["at"] -= FORCE_MIN_SECONDS
+    assert req("GET", "/api/data?force=1")[0] == 200 and calls == [1, 1]
+  finally:
+    srv.shutdown()
+    srv.server_close()
+    g.update(saved)
+    _cache.update(at=0.0, data=None, error=None, errorKind=None)
   print("ok")
 
 
