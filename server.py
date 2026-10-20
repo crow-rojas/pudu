@@ -33,7 +33,7 @@ NEW_FIELDS = "mergeQueueEntry { position state } autoMergeRequest { enabledAt }"
 FRAGMENT = """
 fragment pr on PullRequest {
   number title url isDraft createdAt updatedAt mergedAt additions deletions changedFiles
-  reviewDecision mergeable mergeStateStatus baseRefName headRefName headRefOid
+  reviewDecision mergeable mergeStateStatus baseRefName headRefName headRefOid isCrossRepository
   viewerLatestReview { commit { oid } }
   mergeQueueEntry { position state } autoMergeRequest { enabledAt }
   repository { name owner { login } nameWithOwner defaultBranchRef { name } }
@@ -174,6 +174,7 @@ def slim(node, me=None):
     "conflict": node.get("mergeable") == "CONFLICTING",
     "baseRef": node.get("baseRefName"),
     "headRef": node.get("headRefName"),
+    "fork": bool(node.get("isCrossRepository")),
     "stacked": bool(default) and node.get("baseRefName") != default,
     "labels": [{"name": l.get("name"), "color": l.get("color")} for l in nodes(node, "labels")],
     "comments": (dig(node, "comments", "totalCount") or 0) + sum(dig(t, "comments", "totalCount") or 0 for t in threads),
@@ -379,7 +380,8 @@ def all_prs(d):
 
 
 def link_stacks(d):
-  heads = {(p["repo"], p["headRef"]): p["number"] for p in all_prs(d)}
+  # why: a fork's head branch (often its own main) lives in another repo, so nothing here stacks on it.
+  heads = {(p["repo"], p["headRef"]): p["number"] for p in all_prs(d) if not p["fork"]}
   for p in all_prs(d):
     parent = heads.get((p["repo"], p["baseRef"]))
     p["stackParent"] = parent if parent != p["number"] else None
@@ -774,7 +776,7 @@ def pr_md(ref, lang="en"):
       # why: outside a search we can't tell whether a team request includes you, so only a direct one is claimed.
       p["requestedVia"] = requested_via(p, me, False)
       p["stackParent"] = next((x["number"] for x in all_prs(_cache["data"] or {})
-                               if x["repo"] == p["repo"] and x["headRef"] == p["baseRef"] and x["number"] != p["number"]), None)
+                               if x["repo"] == p["repo"] and x["headRef"] == p["baseRef"] and x["number"] != p["number"] and not x["fork"]), None)
     rollup = dig((nodes(node, "detailChecks") or [{}])[0], "commit", "statusCheckRollup")
     checks = list(dict.fromkeys(
       (c.get("name") or c.get("context"), c.get("detailsUrl") or c.get("targetUrl")) for c in nodes(rollup, "contexts")
@@ -1032,10 +1034,11 @@ def selftest():
   assert "in merge queue (#3) · auto-merge on" in md_line(q) and "en merge queue (#3) · auto-merge activado" in md_line(q, "es")
   assert requested_via(p, "me") == "direct" and requested_via(p, "x") == "team:devs" and requested_via(p, "x", False) is None
   assert "pedida vía team:devs" in md_line({**p, "requestedVia": "team:devs"}, "es") and "via" not in md_line({**p, "requestedVia": "direct"})
-  a, b, c = ({**p, "number": n, "repo": r, "headRef": h, "baseRef": base} for n, r, h, base in (
-    (1, "o/r", "feat/a", "main"), (2, "o/r", "feat/b", "feat/a"), (3, "o/other", "feat/c", "feat/a")))
-  link_stacks({"mine": {"waiting": [a]}, "custom": [{"prs": [b, c]}]})
-  assert (a["stackParent"], b["stackParent"], c["stackParent"]) == (None, 1, None)
+  a, b, c, f = ({**p, "number": n, "repo": r, "headRef": h, "baseRef": base, "fork": n == 4} for n, r, h, base in (
+    (1, "o/r", "feat/a", "main"), (2, "o/r", "feat/b", "feat/a"), (3, "o/other", "feat/c", "feat/a"), (4, "o/r", "main", "main")))
+  link_stacks({"mine": {"waiting": [a]}, "custom": [{"prs": [b, c, f]}]})
+  assert (a["stackParent"], b["stackParent"], c["stackParent"], f["stackParent"]) == (None, 1, None, None)
+  assert not p["fork"] and slim({**node, "isCrossRepository": True})["fork"]
   assert "feat/b -> feat/a · on top of #1 ·" in md_line(b) and "sobre #1" in md_line(b, "es")
   bare = slim({"number": 9, "repository": None, "author": None, "commits": None, "comments": None})
   assert bare["author"] == "ghost" and bare["checks"] is None and bare["failedChecks"] == [] and not bare["stacked"]
