@@ -17,14 +17,17 @@ from urllib.parse import parse_qs, urlsplit
 
 PORT = int(os.environ.get("PORT", 8765))
 HERE = Path(__file__).parent
-CONFIG = Path(os.environ.get("PUDU_CONFIG") or Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "pudu" / "config.json")
+# why: fixture data through the real pipeline, for screenshots and contributors without gh.
+DEMO = "--demo" in sys.argv[1:] or os.environ.get("PUDU_DEMO") == "1"
+# why: demo clicks (hide, snooze, account) must never touch the user's real config.
+CONFIG = Path(os.environ.get("PUDU_CONFIG") or (
+  Path(tempfile.mkdtemp(prefix="pudu-demo-")) if DEMO else Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "pudu"
+) / "config.json")
 # why: several open tabs share one gh call instead of each burning GraphQL rate limit.
 CACHE_SECONDS = 20
 # why: a held-down refresh key or a looping script can't turn force=1 into a gh call per request.
 FORCE_MIN_SECONDS = 5
 MAX_BODY = 1_000_000
-# why: fixture data through the real pipeline, for screenshots and contributors without gh.
-DEMO = "--demo" in sys.argv[1:] or os.environ.get("PUDU_DEMO") == "1"
 STARTED = time.time()
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"}
 
@@ -1203,6 +1206,15 @@ def selftest():
     _tokens.clear()
   finally:
     subprocess.run = real_run
+
+  # demo mode keeps its config in a throwaway dir unless PUDU_CONFIG says otherwise.
+  env = {k: v for k, v in os.environ.items() if k not in ("PUDU_CONFIG", "PUDU_DEMO")}
+  probe = lambda **e: subprocess.run([sys.executable, "-c", "import server; print(server.CONFIG)"], cwd=HERE, capture_output=True,
+                                     text=True, env={**env, "XDG_CONFIG_HOME": "/x", **e}).stdout.strip()
+  tmp = Path(probe(PUDU_DEMO="1"))
+  assert probe() == "/x/pudu/config.json" and tmp.name == "config.json" and tmp.parent.name.startswith("pudu-demo-")
+  assert probe(PUDU_DEMO="1", PUDU_CONFIG="/c.json") == "/c.json"
+  shutil.rmtree(tmp.parent)
 
   # demo goes through build() and covers every section.
   demo = build(*demo_raws())
