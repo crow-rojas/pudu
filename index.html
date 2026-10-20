@@ -85,14 +85,18 @@ kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px sol
 .nav a.hot b{min-width:20px;text-align:center;padding:2px 6px;border-radius:999px;background:var(--accent);color:var(--accent-ink)}
 .nav .gap{height:1px;margin:6px 10px;background:var(--line)}
 
-/* chips + banner */
-.chips{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 10px}
-.chips:empty{display:none}
-.chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:12px;color:var(--muted)}
-.chip:hover{color:var(--ink)}
-.chip b{font-weight:500;color:var(--faint);font-variant-numeric:tabular-nums}
-.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
-.chip[aria-pressed="true"] b{color:inherit;opacity:.7}
+/* repo picker + banner */
+.pop{position:fixed;inset:52px 16px auto auto;margin:0;width:320px;max-width:calc(100vw - 32px);max-height:min(70vh,560px);overflow:auto;padding:6px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:0 20px 50px -12px rgba(0,0,0,.4)}
+.pop-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 8px;font-size:12px;color:var(--faint)}
+.pop-h button{white-space:nowrap;border:0;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0}
+.repo-opt{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer}
+.repo-opt:hover{background:var(--hover)}
+.repo-opt input{accent-color:var(--accent);margin:0}
+.repo-opt span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo-opt em{font-style:normal;color:var(--faint)}
+.repo-opt b{font-weight:500;color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
+#repos-btn[data-filtered]{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
 .banner{display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;padding:8px 12px;border-radius:8px;font-size:13px;
   background:color-mix(in srgb,var(--warn) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 30%,transparent)}
 .banner[hidden]{display:none}
@@ -189,7 +193,7 @@ dialog form{margin-top:16px;text-align:right}
   .c-dec,.c-mrg,.c-size{display:none!important}
   .top{gap:10px}
   .brand{width:auto}.brand span{display:none}
-  .search kbd,#copy-all span{display:none}
+  .search kbd,#copy-all span,#repos-btn span{display:none}
   .shell{grid-template-columns:minmax(0,1fr);padding:8px 10px 24px}
   .side{position:static;overflow-x:auto;scrollbar-width:none}
   .nav{display:flex;width:max-content}
@@ -212,6 +216,7 @@ dialog form{margin-top:16px;text-align:right}
     <kbd>/</kbd>
   </label>
   <div class="tools">
+    <button class="btn" id="repos-btn" type="button" popovertarget="repos" title="Elegir qué repos se muestran"></button>
     <button class="btn" id="copy-all" type="button" title="Copiar todo lo visible como texto (Y)"></button>
     <button class="ib" id="refresh" type="button" aria-label="Refrescar ahora (r)" title="Refrescar ahora (r)"></button>
     <button class="ib" id="notify" type="button" aria-pressed="false"></button>
@@ -225,7 +230,6 @@ dialog form{margin-top:16px;text-align:right}
   <nav class="side" aria-label="Secciones"><ul class="nav" id="nav"></ul></nav>
   <main id="main">
     <div id="banner" class="banner" role="status" hidden></div>
-    <div class="chips" id="chips" role="group" aria-label="Filtrar por repositorio"></div>
     <div id="app" aria-busy="true">
       <div class="sec" aria-hidden="true"><div class="sec-h"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
     </div>
@@ -256,6 +260,10 @@ dialog form{margin-top:16px;text-align:right}
   </dl>
   <form method="dialog"><button class="btn" autofocus>Listo</button></form>
 </dialog>
+<div class="pop" id="repos" popover aria-label="Repos visibles">
+  <div class="pop-h"><span>Los repos ocultos no cuentan ni notifican.</span><button type="button" data-show-all>Mostrar todos</button></div>
+  <div id="repo-list"></div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -299,6 +307,8 @@ const P = {
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
   chev: '<path d="m9 6 6 6-6 6"/>',
   behind: '<path d="M12 4v12M6 10l6 6 6-6"/>',
+  repo: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15Z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
 };
 const ico = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
 
@@ -321,7 +331,7 @@ const NOTIFY_ON = [
 
 const S = {
   data: null, netError: null, loading: false, lastLoad: 0,
-  q: '', repos: new Set(arr(store.get('repos', []))),
+  q: '',
   seen: new Set(arr(store.get('seen', []))), seenSeeded: store.has('seen'),
   notify: store.get('notify', false) === true,
   closed: new Set(arr(store.get('closed', ['bots']))),
@@ -459,14 +469,17 @@ function sectionText(sec) {
 function filterNote() {
   const bits = [];
   if (S.q) bits.push(`texto "${S.q}"`);
-  if (S.reposActive?.size) bits.push(`repos ${[...S.reposActive].join(', ')}`);
   return bits.length ? `\n\nFiltrado por ${bits.join(' y ')}.` : '';
 }
-const allText = () => [`# PRs de @${S.data?.login}${filterNote()}`, ...SECTIONS.map(sectionText)].join('\n\n') + '\n';
+const hiddenRepos = () => arr(S.data?.repos).filter(r => r.hidden).map(r => r.repo);
+// why: same header as /inbox.md, so Claude knows when a repo was left out on purpose.
+function allText() {
+  const hidden = hiddenRepos();
+  return [`# PRs de @${S.data?.login}${filterNote()}`, ...(hidden.length ? [`Repos ocultos: ${hidden.join(', ')}.`] : []), ...SECTIONS.map(sectionText)].join('\n\n') + '\n';
+}
 
 /* filters */
 function matches(p) {
-  if (S.reposActive.size && !S.reposActive.has(p.repo)) return false;
   if (!S.q) return true;
   const hay = norm([p.title, p.repo, p.author, '#' + p.number, p.number, p.headRef, p.baseRef, ...arr(p.labels).map(l => l?.name)].join(' '));
   return norm(S.q).split(/\s+/).filter(Boolean).every(w => hay.includes(w));
@@ -475,10 +488,7 @@ function matches(p) {
 /* render */
 function render() {
   const d = S.data;
-  const repos = new Map();
-  for (const p of SECTIONS.flatMap(s => arr(s.get(d)))) if (p?.repo) repos.set(p.repo, (repos.get(p.repo) || 0) + 1);
-  S.reposActive = new Set([...S.repos].filter(r => repos.has(r)));
-  const filtering = !!S.q || S.reposActive.size > 0;
+  const filtering = !!S.q;
 
   const html = SECTIONS.map(sec => {
     const all = arr(sec.get(d)).filter(Boolean), prs = all.filter(matches);
@@ -505,13 +515,36 @@ function render() {
     return `${sec.gapBefore ? '<li class="gap" aria-hidden="true"></li>' : ''}<li><a href="#sec-${sec.id}" class="${n && sec.urgent ? 'hot' : ''}" data-sec="${sec.id}"><span>${sec.title}</span><b>${n}</b></a></li>`;
   }).join('');
 
-  $('#chips').innerHTML = repos.size > 1 || S.reposActive.size
-    ? `<button class="chip" type="button" data-repo="" aria-pressed="${S.reposActive.size === 0}">Todos</button>` + [...repos].sort().map(([r, n]) =>
-      `<button class="chip" type="button" data-repo="${esc(r)}" aria-pressed="${S.reposActive.has(r)}" title="${esc(r)}">${esc(r.split('/').pop())}<b>${n}</b></button>`).join('')
-    : '';
+  renderRepos();
 
   renderChrome();
   tick();
+}
+
+function renderRepos() {
+  const repos = arr(S.data?.repos), hidden = repos.filter(r => r.hidden).length;
+  const btn = $('#repos-btn');
+  btn.innerHTML = `${ico('repo')}<span>${hidden ? `${repos.length - hidden} de ${repos.length} repos` : 'Todos los repos'}</span>${ico('down')}`;
+  btn.toggleAttribute('data-filtered', hidden > 0);
+  $('#repo-list').innerHTML = repos.map(r => {
+    const [owner, name] = r.repo.includes('/') ? r.repo.split('/') : ['', r.repo];
+    return `<label class="repo-opt" title="${esc(r.repo)}"><input type="checkbox" data-repo="${esc(r.repo)}" ${r.hidden ? '' : 'checked'}>`
+      + `<span><em>${esc(owner)}/</em>${esc(name)}</span><b>${r.count}</b></label>`;
+  }).join('');
+}
+async function setHidden(hidden) {
+  try {
+    const r = await fetch('/api/hidden', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({hidden})});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (!d?.login) return;
+    S.data = d;
+    store.set('snap', d);
+    render();
+  } catch (e) {
+    toast(`No pude guardar los repos: <code>${esc(e.message)}</code>`);
+    render();
+  }
 }
 
 function renderChrome() {
@@ -594,7 +627,11 @@ function syncSeen(d) {
   const keys = SECTIONS.flatMap(s => arr(s.get(d))).filter(Boolean).map(keyOf);
   if (!S.seenSeeded) { keys.forEach(k => S.seen.add(k)); S.seenSeeded = true; }
   // why: a snapshot flagged with error may be partial; pruning against it would re-mark PRs as new.
-  else if (!d.error) S.seen = new Set(keys.filter(k => S.seen.has(k)));
+  // why: a hidden repo's PRs are absent, not gone; keep them seen so unhiding doesn't flag them as new.
+  else if (!d.error) {
+    const hidden = new Set(arr(d.repos).filter(r => r.hidden).map(r => r.repo));
+    S.seen = new Set([...S.seen].filter(k => keys.includes(k) || hidden.has(k.slice(0, k.lastIndexOf('#')))));
+  }
   store.set('seen', [...S.seen]);
 }
 async function load(force = false) {
@@ -750,14 +787,7 @@ document.addEventListener('click', e => {
     copy(sectionText(sec) + filterNote() + '\n', `${sec.title} como texto`);
     return;
   }
-  const chip = t.closest('.chip');
-  if (chip) {
-    const r = chip.dataset.repo;
-    if (!r) S.repos.clear(); else S.repos.has(r) ? S.repos.delete(r) : S.repos.add(r);
-    store.set('repos', [...S.repos]);
-    render();
-    return;
-  }
+  if (t.closest('[data-show-all]')) { setHidden([]); return; }
   const nav = t.closest('.nav a');
   if (nav) { const d = $(`#sec-${nav.dataset.sec}`); if (d?.tagName === 'DETAILS' && !d.open) d.open = true; }
   if (t.closest('[data-action="retry"]')) load(true);
@@ -768,6 +798,9 @@ document.addEventListener('toggle', e => {
   e.target.open ? S.closed.delete(id) : S.closed.add(id);
   store.set('closed', [...S.closed]);
 }, true);
+$('#repo-list').addEventListener('change', () => {
+  setHidden([...document.querySelectorAll('#repo-list input:not(:checked)')].map(i => i.dataset.repo));
+});
 $('#copy-all').addEventListener('click', copyAll);
 $('#refresh').addEventListener('click', () => load(true));
 $('#theme').addEventListener('click', toggleTheme);

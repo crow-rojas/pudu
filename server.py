@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 
 PORT = int(os.environ.get("PORT", 8765))
 HERE = Path(__file__).parent
+CONFIG = Path(os.environ.get("PUDU_CONFIG") or Path.home() / ".config" / "pudu" / "config.json")
 # why: several open tabs share one gh call instead of each burning GraphQL rate limit.
 CACHE_SECONDS = 20
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"}
@@ -210,6 +211,9 @@ def md_line(p):
 
 def inbox_md(d, only=()):
   parts = [f"# PRs de @{d['login']}"]
+  hidden = [r["repo"] for r in d.get("repos", []) if r["hidden"]]
+  if hidden:
+    parts.append(f"Repos ocultos: {', '.join(hidden)}.")
   for sid, title, path in MD_SECTIONS:
     if only and sid not in only:
       continue
@@ -260,6 +264,37 @@ def fetch():
     return build(*(j.result() for j in jobs))
 
 
+def hidden_repos():
+  try:
+    return {r for r in json.loads(CONFIG.read_text()).get("hidden", []) if isinstance(r, str)}
+  except (OSError, ValueError, AttributeError):
+    return set()
+
+
+def save_hidden(repos):
+  CONFIG.parent.mkdir(parents=True, exist_ok=True)
+  CONFIG.write_text(json.dumps({"hidden": sorted(repos)}, indent=2) + "\n")
+
+
+LISTS = [("review", "humans"), ("review", "bots"), *(("mine", k) for k in EMPTY["mine"]), ("merged",)]
+
+
+# why: hiding happens here, not in the page, so the tab badge, notifications and /inbox.md all agree.
+def view(d, hidden):
+  counts = {}
+  for path in LISTS:
+    for p in dig(d, *path) or []:
+      counts[p["repo"]] = counts.get(p["repo"], 0) + 1
+  keep = lambda *path: [p for p in dig(d, *path) or [] if p["repo"] not in hidden]
+  return {
+    **d,
+    "review": {"humans": keep("review", "humans"), "bots": keep("review", "bots")},
+    "mine": {k: keep("mine", k) for k in EMPTY["mine"]},
+    "merged": keep("merged"),
+    "repos": [{"repo": r, "count": counts.get(r, 0), "hidden": r in hidden} for r in sorted(set(counts) | hidden)],
+  }
+
+
 def data(force=False):
   with _lock:
     if force or time.time() - _cache["at"] > CACHE_SECONDS:
@@ -267,7 +302,7 @@ def data(force=False):
         _cache.update(at=time.time(), data=fetch(), error=None)
       except Exception as e:  # why: a network blip keeps showing the last good snapshot, flagged.
         _cache.update(at=time.time(), error=str(e))
-    return {**EMPTY, **(_cache["data"] or {}), "error": _cache["error"]}
+    return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"]}, hidden_repos())
 
 
 MISSING_FRONTEND = "<!doctype html><meta charset=utf-8><title>Pudú</title><p>Falta el frontend: no existe index.html junto a server.py.".encode()
@@ -294,6 +329,19 @@ class Handler(BaseHTTPRequestHandler):
       self._send(200, "image/svg+xml", (HERE / "favicon.svg").read_bytes())
     else:
       self._send(404, "text/plain", b"not found")
+
+  def do_POST(self):
+    # why: demanding JSON forces a CORS preflight, so another web page can't rewrite the config.
+    if urlsplit(self.path).path != "/api/hidden" or not self.headers.get("Content-Type", "").startswith("application/json"):
+      return self._send(404, "text/plain", b"not found")
+    try:
+      repos = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))["hidden"]
+    except (ValueError, KeyError, TypeError):
+      repos = None
+    if not isinstance(repos, list) or len(repos) > 1000 or not all(isinstance(r, str) and 0 < len(r) < 200 for r in repos):
+      return self._send(400, "text/plain", b"bad request")
+    save_hidden(set(repos))
+    self._send(200, "application/json", json.dumps(data()).encode())
 
   def _send(self, code, ctype, body):
     self.send_response(code)
@@ -372,6 +420,11 @@ def selftest():
   assert {k: [p["number"] for p in v] for k, v in out["mine"].items()} == {"returned": [], "approved": [5], "waiting": [4], "draft": [3]}
   assert [p["number"] for p in out["merged"]] == [7, 6]
   assert set(out) | {"error"} == set(EMPTY) | {"error"}
+  v = view(out, {"o/r", "gone/repo"})
+  assert v["review"]["humans"] == [] and v["mine"]["approved"] == [] and v["merged"] == []
+  assert v["repos"] == [{"repo": "gone/repo", "count": 0, "hidden": True}, {"repo": "o/r", "count": 8, "hidden": True}]
+  assert view(out, set())["review"] == out["review"]
+  assert inbox_md(v).startswith("# PRs de @me\n\nRepos ocultos: gone/repo, o/r.\n\n## Necesitan tu review (0)")
   md = inbox_md(out)
   assert md.startswith("# PRs de @me\n\n## Necesitan tu review (2)\n\n- t (o/r#2)") and "## Te devolvieron cambios (0)\n\n(ninguno)" in md
   assert inbox_md(out, {"approved"}) == f"# PRs de @me\n\n## Aprobados (1)\n\n{out['mine']['approved'][0]['md']}\n"

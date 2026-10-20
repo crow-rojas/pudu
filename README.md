@@ -40,6 +40,16 @@ Para desinstalar ambas cosas: `./install.sh uninstall`.
 Si el puerto 8765 está ocupado al correrlo a mano (`Address already in use`), es porque el
 agente de launchd ya lo está sirviendo.
 
+## Elegir repos
+
+El botón de repos, arriba a la derecha, lista los repos donde tienes PRs: los que te pidieron
+revisar, los tuyos abiertos y los mergeados esta semana. Pudú no recorre carpetas; los repos
+salen de esas mismas búsquedas en GitHub. Desmarca uno y sus PRs desaparecen de todas partes:
+la página, el número de la pestaña, las notificaciones y `/inbox.md`. Un repo nuevo aparece
+marcado, para que no se te pierda una review.
+
+La selección se guarda en `~/.config/pudu/config.json` (o en la ruta de `PUDU_CONFIG`).
+
 ## Con Claude Code u otra CLI
 
 Pudú entrega la bandeja como texto pensado para un LLM: una línea por PR con URL, autor, rama,
