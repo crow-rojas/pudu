@@ -43,6 +43,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.4 var(--font);
 a{color:inherit}
 button{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+[hidden]{display:none!important}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .skip{position:absolute;left:-999px;top:8px;background:var(--surface);padding:8px 12px;border-radius:8px;z-index:50}
 .skip:focus{left:8px}
@@ -99,9 +100,23 @@ kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px sol
 #repos-btn[data-filtered]{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
 .banner{display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;padding:8px 12px;border-radius:8px;font-size:13px;
   background:color-mix(in srgb,var(--warn) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 30%,transparent)}
-.banner[hidden]{display:none}
 .banner .i{color:var(--warn)}
 .banner code{font:12px var(--mono);word-break:break-word}
+.banner details{display:inline}
+.banner summary{display:inline;cursor:pointer;color:var(--muted)}
+.banner details[open] code{display:block;margin-top:4px}
+.es{max-width:560px;margin:40px auto;padding:28px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.es img{display:block;border-radius:8px}
+.es h2{margin:14px 0 6px;font-size:18px;font-weight:650}
+.es p{margin:0 0 14px;color:var(--muted)}
+.es p code{font:12.5px var(--mono);color:var(--ink)}
+.es a{color:var(--accent)}
+.cmd{display:flex;align-items:center;gap:10px;margin:0 0 8px;padding:3px 3px 3px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
+.cmd span{min-width:96px;color:var(--muted);font-size:12px}
+.cmd code{flex:1;font:13px var(--mono);white-space:nowrap;overflow-x:auto}
+.es details{margin:0 0 14px}
+.es summary{cursor:pointer;color:var(--muted)}
+.es pre{margin:8px 0 0;padding:10px;max-height:220px;overflow:auto;border-radius:8px;background:var(--surface-2);font:12px var(--mono);white-space:pre-wrap;word-break:break-word}
 
 /* sections */
 .sec{margin:0 0 10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
@@ -216,8 +231,8 @@ dialog form{margin-top:16px;text-align:right}
     <kbd>/</kbd>
   </label>
   <div class="tools">
-    <button class="btn" id="repos-btn" type="button" popovertarget="repos" data-i18n-attr="title:reposTip"></button>
-    <button class="btn" id="copy-all" type="button" data-i18n-attr="title:copyAllTip"></button>
+    <button class="btn" id="repos-btn" type="button" popovertarget="repos" data-i18n-attr="title:reposTip" hidden></button>
+    <button class="btn" id="copy-all" type="button" data-i18n-attr="title:copyAllTip" hidden></button>
     <button class="ib" id="refresh" type="button" data-i18n-attr="aria-label:refreshTip,title:refreshTip"></button>
     <button class="ib" id="notify" type="button" aria-pressed="false"></button>
     <button class="ib" id="theme" type="button" data-i18n-attr="aria-label:themeTip,title:themeTip"></button>
@@ -291,9 +306,20 @@ const T = {
     title: 'Title', reviewers: 'Reviewers', threads: 'Unresolved threads', changes: 'Changes', noMatch: 'No PR matches the filter.',
     someRepos: (a, b) => `${a} of ${b} repos`, allRepos: 'All repos', saveReposFail: "Couldn't save the repos:",
     noServer: e => `Can't reach the local server (${e}). Retrying every minute.`,
-    staleData: (e, at) => `GitHub didn't answer the last refresh (${e}). What you see is from ${at}.`,
     apiPoints: (n, at) => `${n} API points left` + (at ? `, resets at ${at}` : ''),
-    noDataYet: 'No data yet', serverAsking: 'The server is asking GitHub.', retry: 'Retry', noDataShort: 'No data yet',
+    retry: 'Retry', noDataShort: 'No data yet', details: 'Details', thenLogin: 'Then sign in', otherOs: l => `Other systems: ${l}`,
+    e_gh_missing_h: 'Pudú needs the GitHub CLI',
+    e_gh_missing_p: 'Pudú reads your pull requests through <code>gh</code>. Install it, sign in once, and this page fills in by itself.',
+    e_gh_auth_h: 'Sign in to the GitHub CLI', e_gh_auth_p: '<code>gh</code> is installed but not signed in. Run this in a terminal:',
+    e_rate_limit_h: 'GitHub rate limit reached',
+    e_rate_limit_p: at => `GitHub resets your API quota ${at ? 'at ' + at : 'within the hour'}. Pudú tries again by itself.`,
+    e_network_h: "Can't reach GitHub", e_network_p: 'Check your connection or VPN. Pudú keeps retrying.',
+    e_other_h: "GitHub didn't answer", e_other_p: '<code>gh</code> returned an error. The details usually say why.',
+    e_server_h: "Can't reach the Pudú server", e_server_p: 'Start it again with <code>python3 server.py</code>; this page reconnects by itself.',
+    e_loading_h: 'Asking GitHub…', e_loading_p: 'The first load takes a few seconds.',
+    b_gh_missing: 'GitHub CLI not found.', b_gh_auth: 'The GitHub CLI is signed out (<code>gh auth login</code>).',
+    b_rate_limit: at => `GitHub rate limit reached${at ? ', resets at ' + at : ''}.`, b_network: "Can't reach GitHub.",
+    b_other: "GitHub didn't answer the last refresh.", showingFrom: at => `Showing data from ${at}.`,
   },
   es: {
     skip: 'Saltar al contenido', home: 'Pudú, inicio', filter: 'Filtrar PRs', filterTip: 'Busca en título, repo, autor, número, rama y labels',
@@ -324,9 +350,20 @@ const T = {
     title: 'Título', reviewers: 'Reviewers', threads: 'Hilos sin resolver', changes: 'Cambios', noMatch: 'Ningún PR coincide con el filtro.',
     someRepos: (a, b) => `${a} de ${b} repos`, allRepos: 'Todos los repos', saveReposFail: 'No pude guardar los repos:',
     noServer: e => `No hay conexión con el server local (${e}). Sigo intentando cada minuto.`,
-    staleData: (e, at) => `GitHub no respondió en el último refresco (${e}). Lo que ves es de las ${at}.`,
     apiPoints: (n, at) => `${n} puntos de API` + (at ? `, se renueva a las ${at}` : ''),
-    noDataYet: 'Todavía no hay datos', serverAsking: 'El server está consultando GitHub.', retry: 'Reintentar', noDataShort: 'Sin datos todavía',
+    retry: 'Reintentar', noDataShort: 'Sin datos todavía', details: 'Detalles', thenLogin: 'Después inicia sesión', otherOs: l => `Otros sistemas: ${l}`,
+    e_gh_missing_h: 'Pudú necesita la CLI de GitHub',
+    e_gh_missing_p: 'Pudú lee tus pull requests a través de <code>gh</code>. Instálala, inicia sesión una vez y esta página se llena sola.',
+    e_gh_auth_h: 'Inicia sesión en la CLI de GitHub', e_gh_auth_p: '<code>gh</code> está instalada pero sin sesión. Corre esto en una terminal:',
+    e_rate_limit_h: 'Se agotó la cuota de la API de GitHub',
+    e_rate_limit_p: at => `GitHub renueva tu cuota ${at ? 'a las ' + at : 'dentro de la hora'}. Pudú vuelve a intentar solo.`,
+    e_network_h: 'No hay conexión con GitHub', e_network_p: 'Revisa tu conexión o VPN. Pudú sigue intentando.',
+    e_other_h: 'GitHub no respondió', e_other_p: '<code>gh</code> devolvió un error. El detalle suele explicar por qué.',
+    e_server_h: 'No hay conexión con el server de Pudú', e_server_p: 'Vuelve a levantarlo con <code>python3 server.py</code>; esta página se reconecta sola.',
+    e_loading_h: 'Consultando GitHub…', e_loading_p: 'La primera carga toma unos segundos.',
+    b_gh_missing: 'No encuentro la CLI de GitHub.', b_gh_auth: 'La CLI de GitHub no tiene sesión (<code>gh auth login</code>).',
+    b_rate_limit: at => `Se agotó la cuota de GitHub${at ? ', se renueva a las ' + at : ''}.`, b_network: 'No hay conexión con GitHub.',
+    b_other: 'GitHub no respondió en el último refresco.', showingFrom: at => `Lo que ves es de las ${at}.`,
   },
 };
 const LANG = /^es\b/i.test((navigator.languages || [])[0] || navigator.language || '') ? 'es' : 'en';
@@ -392,7 +429,7 @@ const S = {
   seen: new Set(arr(store.get('seen', []))), seenSeeded: store.has('seen'),
   notify: store.get('notify', false) === true,
   closed: new Set(arr(store.get('closed', ['bots']))),
-  sel: null, retryTimer: null, visible: {}, cached: false,
+  sel: null, retryTimer: null, visible: {}, cached: false, err: null,
 };
 
 /* time */
@@ -563,6 +600,7 @@ function render() {
   const hadFocus = document.activeElement?.closest?.('.pr');
   const app = $('#app');
   app.innerHTML = html;
+  delete app.dataset.empty;
   app.setAttribute('aria-busy', 'false');
   if (hadFocus && S.sel) $(`.pr[data-id="${CSS.escape(S.sel)}"] .t`)?.focus({preventScroll: true});
 
@@ -610,24 +648,41 @@ function renderChrome() {
   setFavicon(urgent);
   const me = $('#me');
   if (safeUrl(d?.avatarUrl) && me.getAttribute('src') !== d.avatarUrl) { me.src = d.avatarUrl; me.alt = d.login || ''; }
-  const b = $('#banner');
+  for (const id of ['#repos-btn', '#copy-all']) $(id).hidden = !d;
+  const b = $('#banner'), e = S.err;
   let msg = '';
-  if (S.netError) msg = t('noServer', `<code>${esc(S.netError)}</code>`);
-  else if (d?.error && d?.login) msg = t('staleData', `<code>${esc(d.error)}</code>`, hhmm(d.fetchedAt * 1000));
+  if (S.netError && d) msg = t('noServer', `<code>${esc(S.netError)}</code>`);
+  else if (e && d) {
+    msg = t('b_' + e.kind, resetAt()) + ' ' + t('showingFrom', hhmm(d.fetchedAt * 1000));
+    if (e.kind === 'other') msg += ` <details><summary>${t('details')}</summary><code>${esc(e.msg)}</code></details>`;
+  }
   b.hidden = !msg;
   if (msg) b.innerHTML = `${ico('alert')}<span>${msg}</span>`;
   const rl = d?.rateLimit;
-  if (rl && Number.isFinite(Number(rl.remaining))) {
-    $('#rate').innerHTML = `<span class="${Number(rl.remaining) < 500 ? 'warn-t' : ''}">${esc(t('apiPoints', num.format(rl.remaining), Date.parse(rl.resetAt) ? hhmm(Date.parse(rl.resetAt)) : ''))}</span>`;
-  } else $('#rate').textContent = '';
+  $('#rate').innerHTML = Number(rl?.remaining) < 500 ? `<span class="warn-t">${esc(t('apiPoints', num.format(rl.remaining), resetAt()))}</span>` : '';
 }
+const resetAt = () => { const ms = Date.parse(S.err?.resetAt || S.data?.rateLimit?.resetAt); return ms ? hhmm(ms) : ''; };
 
-function renderNoData(message) {
-  $('#app').setAttribute('aria-busy', 'false');
-  $('#app').innerHTML = `<div class="sec"><div class="sec-h"><h2>${t('noDataYet')}</h2>`
-    + `<span class="hint">${message ? esc(message) : t('serverAsking')}</span>`
-    + `<button class="btn" type="button" data-action="retry">${ico('refresh')}${t('retry')}</button></div></div>`;
+const cmd = (text, label = '') => `<div class="cmd">${label ? `<span>${esc(label)}</span>` : ''}<code>${esc(text)}</code>`
+  + `<button class="ib" type="button" data-copy-text="${esc(text)}" aria-label="${esc(t('copy'))} ${esc(text)}">${ico('copy')}</button></div>`;
+const FIX = {
+  gh_missing: () => cmd('brew install gh', 'macOS') + cmd('sudo apt install gh', 'Debian, Ubuntu')
+    + `<p>${t('otherOs', '<a href="https://cli.github.com" target="_blank" rel="noopener">cli.github.com</a>')}</p>` + cmd('gh auth login', t('thenLogin')),
+  gh_auth: () => cmd('gh auth login'),
+  other: () => `<details><summary>${t('details')}</summary><pre>${esc(S.err?.msg)}</pre></details>`,
+};
+// why: the 5 s retry would otherwise rebuild the card and collapse an open <details> under the reader.
+function renderNoData() {
+  const kind = S.netError ? 'server' : S.err ? S.err.kind : 'loading';
+  const html = `<section class="es" aria-labelledby="es-h"><img src="/favicon.svg" alt="" width="36" height="36">`
+    + `<h2 id="es-h">${t('e_' + kind + '_h')}</h2><p>${t('e_' + kind + '_p', resetAt())}</p>${FIX[kind]?.() || ''}`
+    + (kind === 'loading' ? '' : `<button class="btn" type="button" data-action="retry">${ico('refresh')}${t('retry')}</button>`) + '</section>';
+  const app = $('#app');
+  if (app.dataset.empty !== html) { app.innerHTML = html; app.dataset.empty = html; }
+  app.setAttribute('aria-busy', String(kind === 'loading'));
+  $('#nav').innerHTML = '';
   $('#fresh').textContent = t('noDataShort');
+  renderChrome();
 }
 
 /* live bits */
@@ -700,8 +755,10 @@ async function load(force = false) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     S.netError = null;
+    const kind = T.en['b_' + d?.errorKind] ? d.errorKind : 'other';
+    S.err = d?.error ? {kind, msg: d.error, resetAt: d.rateLimit?.resetAt} : null;
     if (!d || !d.login) {
-      if (!S.data) renderNoData(d?.error);
+      if (S.data) renderChrome(); else renderNoData();
       S.retryTimer = setTimeout(load, 5000);
       return;
     }
@@ -715,7 +772,7 @@ async function load(force = false) {
     if (force) toast(t('upToDate'));
   } catch (e) {
     S.netError = e.message || t('netErr');
-    if (S.data) renderChrome(); else renderNoData(S.netError);
+    if (S.data) renderChrome(); else renderNoData();
   } finally {
     S.loading = false;
     S.lastLoad = Date.now();
@@ -847,6 +904,8 @@ document.addEventListener('click', e => {
   const nav = t.closest('.nav a');
   if (nav) { const d = $(`#sec-${nav.dataset.sec}`); if (d?.tagName === 'DETAILS' && !d.open) d.open = true; }
   if (t.closest('[data-action="retry"]')) load(true);
+  const ct = t.closest('[data-copy-text]');
+  if (ct) copy(ct.dataset.copyText);
 });
 document.addEventListener('toggle', e => {
   const id = e.target.dataset?.sec;
