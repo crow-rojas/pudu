@@ -90,8 +90,8 @@ def error_kind(e):
   return next((kind for kind, words in ERROR_KINDS if any(w in s for w in words)), "other")
 
 
-def gh(*args, partial=False):
-  out = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=60)
+def gh(*args, partial=False, env=None):
+  out = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=60, env=env)
   # why: `gh api graphql` exits 1 on partial GraphQL errors while still printing usable data.
   if out.returncode and not (partial and out.stdout.strip()):
     raise RuntimeError(out.stderr.strip() or "gh failed")
@@ -306,7 +306,7 @@ def inbox_md(d, only=(), lang="en"):
 def graphql(query, **variables):
   # why: -F would turn a numeric-looking string (a query, an owner) into a number; only non-strings go typed.
   args = [a for k, v in variables.items() for a in (("-f", f"{k}={v}") if isinstance(v, str) else ("-F", f"{k}={json.dumps(v)}"))]
-  out = json.loads(gh("api", "graphql", "-f", f"query={query}", *args, partial=True))
+  out = json.loads(gh("api", "graphql", "-f", f"query={query}", *args, partial=True, env=gh_env()))
   if not out.get("data"):
     msg = "; ".join(str(e.get("message", e)) for e in out.get("errors") or []) or "gh returned no data"
     if NEW_FIELDS in query and ("mergeQueueEntry" in msg or "autoMergeRequest" in msg):
@@ -317,6 +317,41 @@ def graphql(query, **variables):
 
 def search(q, n, requested=False):
   return graphql(QUERY, q=q, n=n, requested=requested)
+
+
+DEMO_ACCOUNTS = [{"host": "github.com", "user": "crow-demo", "active": True}, {"host": "ghe.acme.dev", "user": "demo-work", "active": True}]
+HOST = re.compile(r"[A-Za-z0-9.-]{1,253}(:\d{1,5})?")
+USER = re.compile(r"[\w-]{1,100}")
+# why: the token lives only in memory and in gh's env; it never reaches data, md or logs.
+_tokens = {}
+
+
+def config_account(c):
+  a = c.get("account")
+  if isinstance(a, dict) and all(isinstance(a.get(k), str) and r.fullmatch(a[k]) for k, r in (("host", HOST), ("user", USER))):
+    return {"host": a["host"], "user": a["user"]}
+
+
+# why: no account in config means gh's own active account, untouched; a chosen one runs gh as that account.
+def gh_env():
+  a = config_account(read_config())
+  if not a:
+    return None
+  k = (a["host"], a["user"])
+  if k not in _tokens:
+    _tokens[k] = gh("auth", "token", "--hostname", a["host"], "--user", a["user"]).strip()
+  return {**os.environ, "GH_HOST": a["host"], "GH_TOKEN": _tokens[k]}
+
+
+def gh_accounts():
+  if DEMO:
+    return DEMO_ACCOUNTS
+  try:
+    # why: exits 1 when any account has a bad token, still printing the JSON; older gh has no --json at all.
+    hosts = json.loads(gh("auth", "status", "--json", "hosts", partial=True))["hosts"]
+    return [{"host": h, "user": a["login"], "active": bool(a.get("active"))} for h, accs in hosts.items() for a in accs if a.get("login")]
+  except Exception:
+    return []
 
 
 # why: a team request reaches you only through membership, which the API doesn't tell us; the search already did.
@@ -380,7 +415,7 @@ def build(review_raw, mine_raw, merged_raw, rereview_raw=None, custom=()):
 def demo_raws():
   now = datetime.datetime.now(datetime.timezone.utc)
   iso = lambda h: (now - datetime.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")
-  me = "lena-park"
+  me = "crow-demo"
   user = lambda login, kind="User": {"__typename": kind, "login": login, "avatarUrl": None}
 
   def pr(repo, number, title, author, hours, head, base="main", checks="SUCCESS", failed=(), decision="REVIEW_REQUIRED",
@@ -473,11 +508,12 @@ def section_query(q):
 
 def fetch():
   if DEMO:
-    return build(*demo_raws())
+    return {**build(*demo_raws()), "accounts": DEMO_ACCOUNTS}
   base = "is:pr is:open archived:false"
   # why: GitHub reads merged:>=DATE in UTC; a local date would shift the window near midnight.
   since = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-  sections = custom_sections(read_config())
+  c = read_config()
+  sections = custom_sections(c)
 
   # why: one broken custom query shows its error in its own section instead of failing the whole inbox.
   def custom(q):
@@ -488,7 +524,7 @@ def fetch():
 
   # why: one combined query runs the searches serially and hits GitHub's ~10s timeout (502);
   # parallel calls finish in the time of the slowest.
-  with ThreadPoolExecutor(4 + len(sections)) as pool:
+  with ThreadPoolExecutor(5 + len(sections)) as pool:
     jobs = [
       # why: when results overflow `first`, keep the freshest; search has no sort by merge date.
       pool.submit(search, f"{base} review-requested:@me sort:updated-desc", 100, True),
@@ -497,7 +533,10 @@ def fetch():
       pool.submit(search, f"{base} reviewed-by:@me -author:@me sort:updated-desc", 100),
     ]
     extra = [(s, pool.submit(custom, section_query(s["query"]))) for s in sections]
-    return build(*(j.result() for j in jobs), [(s, *j.result()) for s, j in extra])
+    accounts = pool.submit(gh_accounts)
+    d = build(*(j.result() for j in jobs), [(s, *j.result()) for s, j in extra])
+  host = (config_account(c) or {}).get("host") or os.environ.get("GH_HOST") or "github.com"
+  return {**d, "accounts": accounts.result() or [{"host": host, "user": d["login"], "active": True}]}
 
 
 def read_config():
@@ -573,7 +612,7 @@ LISTS = [("review", "humans"), ("review", "bots"), *(("mine", k) for k in EMPTY[
 # why: hiding and snoozing happen here, not in the page, so the tab badge, notifications and /inbox.md all agree.
 # why: md is built here per request because the cache is shared by clients asking in different languages.
 def view(d, c, lang="en"):
-  hidden, snoozed, sleeping, counts = hidden_repos(c), snoozes(c), {}, {}
+  hidden, snoozed, sleeping, counts, accounts = hidden_repos(c), snoozes(c), {}, {}, d.get("accounts") or []
   for p in all_prs(d):
     counts[p["repo"]] = counts.get(p["repo"], 0) + 1
 
@@ -601,7 +640,15 @@ def view(d, c, lang="en"):
     "snoozed": sorted(sleeping.values(), key=lambda p: p["snoozedUntil"]),
     "repos": [{"repo": r, "count": counts.get(r, 0), "hidden": r in hidden} for r in sorted(set(counts) | hidden)],
     "settings": {"staleHours": stale_hours(c)},
+    "accounts": accounts,
+    "account": current_account(c, accounts),
   }
+
+
+def current_account(c, accounts):
+  active = [a for a in accounts if a["active"]]
+  a = next((a for a in active if a["host"] == (os.environ.get("GH_HOST") or "github.com")), active[0] if active else None)
+  return config_account(c) or a and {"host": a["host"], "user": a["user"]}
 
 
 def data(force=False, lang="en"):
@@ -612,6 +659,8 @@ def data(force=False, lang="en"):
         _cache.update(data=fetch(), error=None, errorKind=None)
       except Exception as e:  # why: a network blip keeps showing the last good snapshot, flagged.
         _cache.update(error=str(e), errorKind=error_kind(e))
+        if _cache["errorKind"] == "gh_auth":
+          _tokens.clear()
       _cache["at"] = time.time()
     c = read_config()
     if DEMO:
@@ -650,7 +699,18 @@ def post_snooze(body):
   return True
 
 
-POSTS = {"/api/hidden": post_hidden, "/api/snooze": post_snooze}
+def post_account(body):
+  a = config_account({"account": body})
+  accounts = (_cache["data"] or {}).get("accounts") or gh_accounts()
+  if not a or not any(a == {"host": x["host"], "user": x["user"]} for x in accounts):
+    return False
+  update_config(lambda c: c.update(account=a))
+  # why: the reply must come from the new account, so skip both the cache and the force throttle.
+  _cache["at"] = 0.0
+  return True
+
+
+POSTS = {"/api/hidden": post_hidden, "/api/snooze": post_snooze, "/api/account": post_account}
 
 
 def pick_lang(qs):
@@ -728,6 +788,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def selftest():
+  # why: the real config (an account in it) would change what gh gets called with.
+  g = globals()
+  saved = {k: g[k] for k in ("CONFIG", "fetch", "search", "gh_accounts", "DEMO")}
+  g["CONFIG"] = Path(tempfile.mkdtemp()) / "pudu" / "config.json"
   node = {
     "number": 1, "title": "t", "url": "u", "isDraft": False, "createdAt": "2026-01-01T00:00:00Z",
     "updatedAt": "2026-01-02T00:00:00Z", "mergedAt": None, "additions": 1, "deletions": 2, "changedFiles": 1,
@@ -923,6 +987,29 @@ def selftest():
     )))[1]
     assert search("123", 5) == {"ok": 1} and len(argv) == 2
     assert argv[1][-6:] == ["-f", "q=123", "-F", "n=5", "-F", "requested=false"]
+
+    # accounts: listed from `gh auth status --json`, [] on older gh; a chosen one runs gh with its own host and token.
+    status = {"hosts": {"github.com": [{"login": "a", "active": True}, {"login": "b", "active": False}], "ghe.x": [{"login": "w", "active": True}]}}
+    fake(1, json.dumps(status))
+    assert gh_accounts() == [{"host": "github.com", "user": "a", "active": True}, {"host": "github.com", "user": "b", "active": False},
+                             {"host": "ghe.x", "user": "w", "active": True}]
+    fake(1, "", "unknown flag: --json")
+    assert gh_accounts() == []
+    accs = [{"host": "ghe.x", "user": "w", "active": True}, {"host": "github.com", "user": "a", "active": True}]
+    assert current_account({}, accs) == {"host": "github.com", "user": "a"} and current_account({}, []) is None
+    assert current_account({"account": {"host": "ghe.x", "user": "w"}}, accs) == {"host": "ghe.x", "user": "w"}
+    for bad in ({"host": "a b", "user": "w"}, {"host": "ghe.x", "user": "w;rm"}, {"host": "ghe.x"}, ["ghe.x", "w"], "x"):
+      assert config_account({"account": bad}) is None, bad
+    argv, envs = [], []
+    subprocess.run = lambda a, **k: (argv.append(a), envs.append(k.get("env")), subprocess.CompletedProcess(
+      a, 0, "tok-123\n" if a[1] == "auth" else json.dumps({"data": {"ok": 1}}), ""))[2]
+    assert search("q", 1) == {"ok": 1} and envs == [None]
+    update_config(lambda c: c.update(account={"host": "ghe.x", "user": "w"}))
+    search("q", 1), search("q", 1)
+    assert [a[1:] for a in argv[1:] if a[1] == "auth"] == [["auth", "token", "--hostname", "ghe.x", "--user", "w"]]
+    assert [(e["GH_HOST"], e["GH_TOKEN"]) for e in envs[2:]] == [("ghe.x", "tok-123")] * 2
+    CONFIG.write_text("{}")
+    _tokens.clear()
   finally:
     subprocess.run = real_run
 
@@ -936,14 +1023,17 @@ def selftest():
   assert by["acme/api#486"]["stackParent"] == 484 and by["acme/api#486"]["autoMerge"] and by["acme/api#484"]["mergeQueue"]["position"] == 2
   assert by["octo-labs/infra#77"]["requestedVia"] == "team:platform" and by["acme/web#1290"]["requestedVia"] == "direct"
   assert by["acme/api#488"]["requestedVia"] is None
+  g["DEMO"] = True
+  dd = data()
+  g["DEMO"] = False
+  _cache.update(at=0.0, data=None)
+  assert [p["key"] for p in dd["snoozed"]] == ["octo-labs/docs#212"] and dd["mine"]["waiting"][0]["number"] == 486
+  assert dd["account"] == {"host": "github.com", "user": "crow-demo"} and len(dd["accounts"]) == 2
+  assert [(c["title"], [p["requestedVia"] for p in c["prs"]]) for c in dd["custom"]] == [("Team queue", ["team:backend"] * 2)]
 
   # HTTP: Host/Sec-Fetch-Site checks, body limits, force throttle, config preserving unknown keys.
   import http.client
-  g = globals()
-  saved = {k: g[k] for k in ("CONFIG", "fetch", "search")}
-  tmp = tempfile.mkdtemp()
-  g["CONFIG"] = Path(tmp) / "pudu" / "config.json"
-  CONFIG.parent.mkdir()
+  CONFIG.parent.mkdir(parents=True, exist_ok=True)
   CONFIG.write_text(json.dumps({"hidden": ["x/y"], "future": {"keep": 1}}))
   calls = []
   g["fetch"] = lambda: (calls.append(1), out)[1]
@@ -1018,10 +1108,22 @@ def selftest():
       if q.startswith("is:pr boom"):
         raise RuntimeError("bad query")
       return raw(team) if "team-review" in q else raw()
-    g["search"] = fake_search
+    g["search"], g["gh_accounts"] = fake_search, lambda: []
     f = saved["fetch"]()
     assert [(c["id"], len(c["prs"]), c["error"]) for c in f["custom"]] == [("team", 1, None), ("boom", 0, "bad query")]
     assert len(queries) == 6 and "is:pr is:open team-review-requested:o/t archived:false" in queries
+    # why: gh without `auth status --json` still gets the account it's logged in as.
+    assert f["accounts"] == [{"host": os.environ.get("GH_HOST") or "github.com", "user": "me", "active": True}]
+
+    # account: only one gh knows; saved without losing other keys; the reply is a fresh fetch past the throttle.
+    CONFIG.write_text(json.dumps({"future": 1}))
+    g["gh_accounts"] = lambda: DEMO_ACCOUNTS
+    for bad in ({"host": "ghe.acme.dev", "user": "someone"}, {"host": "evil host", "user": "demo-work"}, {"user": "demo-work"}, "x"):
+      assert js("/api/account", bad)[0] == 400, bad
+    n = len(calls)
+    code, body = js("/api/account", {"host": "ghe.acme.dev", "user": "demo-work"})
+    assert code == 200 and json.loads(body)["account"] == {"host": "ghe.acme.dev", "user": "demo-work"} and len(calls) == n + 1
+    assert json.loads(CONFIG.read_text()) == {"future": 1, "account": {"host": "ghe.acme.dev", "user": "demo-work"}}
   finally:
     srv.shutdown()
     srv.server_close()
