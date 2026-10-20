@@ -344,7 +344,7 @@ const T = {
     upToDate: 'Up to date', netErr: 'network error', fetched: a => `GitHub data ${a}`,
     notifOn: 'Desktop notifications on', notifOff: 'Turn on desktop notifications', notifUnsupported: "This browser doesn't support notifications",
     notifBlocked: 'The browser blocked notifications', notifyYes: "I'll tell you when something new arrives", notifyNo: 'Notifications off',
-    k_move: 'Move down and up between PRs', k_open: 'Open the PR on GitHub', k_copy: 'Copy the PR as text', k_copyAll: 'Copy everything visible as text',
+    k_move: 'Move down and up between PRs', k_sections: 'Jump to the previous or next section', k_seen: 'Mark the PR as seen (clears the dot)', k_open: 'Open the PR on GitHub', k_copy: 'Copy the PR as text', k_copyAll: 'Copy everything visible as text',
     k_branch: "Copy the PR's branch", k_checkout: 'Copy <code>gh pr checkout</code>', k_filter: 'Filter', k_repos: 'Choose which repos to show', k_refresh: 'Refresh, skipping the cache',
     k_theme: 'Switch between light and dark', k_esc: 'Clear the filter or close', k_help: 'Show this help',
     r_APPROVED: l => `${l} approved`, r_CHANGES_REQUESTED: l => `${l} requested changes`, r_COMMENTED: l => `${l} commented`, r_DISMISSED: l => `${l}'s review was dismissed`,
@@ -392,7 +392,7 @@ const T = {
     upToDate: 'Al día', netErr: 'error de red', fetched: a => `Datos de GitHub ${a}`,
     notifOn: 'Notificaciones de escritorio activadas', notifOff: 'Activar notificaciones de escritorio', notifUnsupported: 'Este navegador no soporta notificaciones',
     notifBlocked: 'El navegador bloqueó las notificaciones', notifyYes: 'Te aviso cuando llegue algo nuevo', notifyNo: 'Notificaciones apagadas',
-    k_move: 'Bajar y subir entre PRs', k_open: 'Abrir el PR en GitHub', k_copy: 'Copiar el PR como texto', k_copyAll: 'Copiar todo lo visible como texto',
+    k_move: 'Bajar y subir entre PRs', k_sections: 'Saltar a la sección anterior o siguiente', k_seen: 'Marcar el PR como visto (quita el punto)', k_open: 'Abrir el PR en GitHub', k_copy: 'Copiar el PR como texto', k_copyAll: 'Copiar todo lo visible como texto',
     k_branch: 'Copiar la rama del PR', k_checkout: 'Copiar <code>gh pr checkout</code>', k_filter: 'Filtrar', k_repos: 'Elegir qué repos se muestran', k_refresh: 'Refrescar sin caché',
     k_theme: 'Cambiar entre claro y oscuro', k_esc: 'Limpiar filtro o cerrar', k_help: 'Mostrar esta ayuda',
     r_APPROVED: l => `${l} aprobó`, r_CHANGES_REQUESTED: l => `${l} pidió cambios`, r_COMMENTED: l => `${l} comentó`, r_DISMISSED: l => `Review de ${l} descartada`,
@@ -1026,21 +1026,32 @@ function move(step) {
   const i = rows.findIndex(r => r.dataset.id === S.sel);
   select(rows[i < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, i + step))]);
 }
+function jumpSection(step) {
+  const secs = [...document.querySelectorAll('details.sec')].filter(s => s.querySelector('.pr'));
+  if (!secs.length) return;
+  const i = secs.indexOf(current()?.closest('details.sec'));
+  const next = secs[i < 0 ? (step > 0 ? 0 : secs.length - 1) : Math.min(secs.length - 1, Math.max(0, i + step))];
+  next.open = true;
+  select(next.querySelector('.pr'));
+  next.scrollIntoView({block: 'start'});
+}
 const current = () => S.sel ? $(`.pr[data-id="${CSS.escape(S.sel)}"]`) : null;
 
 document.addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const inField = e.target.matches?.('input, textarea, select');
   if (inField) {
-    if (e.key === 'Escape') { if (e.target.value) { e.target.value = ''; setQuery(''); } else e.target.blur(); }
+    if (e.key === 'Escape') { if (e.target.value) { e.preventDefault(); e.target.value = ''; e.target.dispatchEvent(new Event('input')); } else e.target.blur(); }
     else if (e.key === 'Enter' && e.target.id === 'q') { e.preventDefault(); e.target.blur(); move(0); }
     return;
   }
-  if ($('#help').open) return;
+  if ($('#help').open || $('#repos').matches(':popover-open')) return;
   const k = e.key, r = current(), p = r && prOf(r);
   if (k === 'j' || k === 'ArrowDown') { e.preventDefault(); move(1); }
   else if (k === 'k' || k === 'ArrowUp') { e.preventDefault(); move(-1); }
   else if (k === 'o' || (k === 'Enter' && !e.target.closest?.('a, button, summary'))) { if (r) { e.preventDefault(); r.querySelector('.t')?.click(); } }
+  else if (k === '[' || k === ']') jumpSection(k === ']' ? 1 : -1);
+  else if (k === 'x') markSeen(r);
   else if (k === 'y') { if (p) copy(p.md, t('asText', `${repoName(p)} #${p.number}`)); }
   else if (k === 'Y') copyAll();
   else if (k === 'c') { if (r) r.dataset.ref ? copy(r.dataset.ref) : toast(t('noBranch')); }
@@ -1099,7 +1110,7 @@ addEventListener('focus', () => { if (Date.now() - S.lastLoad > FOCUS_MIN_GAP_MS
 
 for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
 for (const el of document.querySelectorAll('[data-i18n-attr]')) for (const pair of el.dataset.i18nAttr.split(',')) { const [a, k] = pair.split(':'); el.setAttribute(a, t(k)); }
-$('#keys').innerHTML = [['j k', 'move'], ['o Enter', 'open'], ['y', 'copy'], ['Y', 'copyAll'], ['c', 'branch'], ['g', 'checkout'], ['/', 'filter'],
+$('#keys').innerHTML = [['j k', 'move'], ['[ ]', 'sections'], ['o Enter', 'open'], ['x', 'seen'], ['y', 'copy'], ['Y', 'copyAll'], ['c', 'branch'], ['g', 'checkout'], ['/', 'filter'],
   ['p', 'repos'], ['r', 'refresh'], ['t', 'theme'], ['Esc', 'esc'], ['?', 'help']]
   .map(([keys, k]) => `<dt>${keys.split(' ').map(x => `<kbd>${esc(x)}</kbd>`).join('')}</dt><dd>${t('k_' + k)}</dd>`).join('');
 $('#curl').textContent = `curl -s ${location.host}/inbox.md`;
