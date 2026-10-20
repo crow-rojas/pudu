@@ -1003,14 +1003,10 @@ def selftest():
     ]},
   }
   p = slim(node, "me")
-  assert p["bot"] and p["conflict"] and p["stacked"] and p["checks"] == "FAILURE"
-  assert p["failedChecks"] == ["lint", "ci/x"]
-  assert p["comments"] == 5 and p["unresolvedThreads"] == 1
-  assert p["labels"] == [{"name": "bug", "color": "d73a4a"}]
+  assert p["bot"] and p["conflict"] and p["stacked"] and p["checks"] == "FAILURE" and p["failedChecks"] == ["lint", "ci/x"]
+  assert (p["comments"], p["unresolvedThreads"], p["threads"], p["requestedAt"]) == (5, 1, 2, "T3")
+  assert p["labels"] == [{"name": "bug", "color": "d73a4a"}] and p["reviews"] == [{"login": "a", "state": "APPROVED", "avatar": "x"}]
   assert p["pending"] == [{"login": "team:devs", "avatar": None}, {"login": "me", "avatar": "m"}]
-  assert p["reviews"] == [{"login": "a", "state": "APPROVED", "avatar": "x"}]
-  assert p["requestedAt"] == "T3"
-  assert p["threads"] == 2
   es, en = md_line(p, "es"), md_line(p)
   assert es.startswith("- t (o/r#1) u\n  @dependabot · feat/x -> feat/base · CI falló (lint, ci/x) · cambios pedidos")
   assert "conflicto" in es and "hilos sin resolver: 1" in es and "+1 -2 en 1 archivo ·" in es
@@ -1062,12 +1058,11 @@ def selftest():
         rl={"cost": 6, "remaining": 90, "resetAt": "R2"}),
     raw({**human, "number": 6, "mergedAt": "2026-01-01T00:00:00Z"}, {**human, "number": 7, "mergedAt": "2026-03-01T00:00:00Z"}),
   )
-  assert out["login"] == "me" and out["avatarUrl"] == "av"
-  assert out["rateLimit"] == {"cost": 13, "remaining": 90, "resetAt": "R2"}
-  assert [p["number"] for p in out["review"]["humans"]] == [2, 1] and [p["number"] for p in out["review"]["bots"]] == [1]
-  assert {k: [p["number"] for p in v] for k, v in out["mine"].items()} == {"returned": [8], "approved": [5], "waiting": [4], "draft": [3]}
-  assert [p["number"] for p in out["merged"]] == [7, 6]
-  assert set(out) | {"error"} == set(EMPTY) | {"error"}
+  assert (out["login"], out["avatarUrl"], out["rateLimit"]) == ("me", "av", {"cost": 13, "remaining": 90, "resetAt": "R2"})
+  nums = lambda prs: [p["number"] for p in prs]
+  assert nums(out["review"]["humans"]) == [2, 1] and nums(out["review"]["bots"]) == [1] and nums(out["merged"]) == [7, 6]
+  assert {k: nums(v) for k, v in out["mine"].items()} == {"returned": [8], "approved": [5], "waiting": [4], "draft": [3]}
+  assert set(out) == set(EMPTY)
   v = view(out, {"hidden": ["o/r", "gone/repo"]})
   assert v["review"]["humans"] == [] and v["mine"]["approved"] == [] and v["merged"] == []
   assert v["repos"] == [{"repo": "gone/repo", "count": 0, "hidden": True}, {"repo": "o/r", "count": 9, "hidden": True}]
@@ -1256,7 +1251,7 @@ def selftest():
     raise RuntimeError("HTTP 502")
   g["graphql"] = boom
   assert pr_md("o/r#1") == (503, "gh: HTTP 502")
-  g["graphql"], g["DEMO"] = (lambda q, **v: {"repository": {"pullRequest": detail}}), True
+  g["graphql"], g["DEMO"] = (lambda q, **v: {"repository": {"pullRequest": detail}}), True  # why: the HTTP checks below fetch this PR.
   code, text = pr_md("acme/api#488")
   g["DEMO"] = False
   assert code == 200 and "## Failed checks\n- test (3.12)\n- lint\n" in text and "gh pr diff 488 -R acme/api" in text
@@ -1266,7 +1261,7 @@ def selftest():
   CONFIG.parent.mkdir(parents=True, exist_ok=True)
   CONFIG.write_text(json.dumps({"hidden": ["x/y"], "future": {"keep": 1}}))
   calls = []
-  g["fetch"] = lambda: (calls.append(1), out)[1]
+  g["fetch"] = ok_fetch = lambda: (calls.append(1), out)[1]
   _cache.update(at=0.0, data=None, error=None, errorKind=None)
   srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
   port = srv.server_port
@@ -1288,9 +1283,8 @@ def selftest():
       assert req("GET", "/inbox.md", Host=host)[0] == 200, host
     for host in (f"evil.com:{port}", "localhost:1", "localhost"):
       assert req("GET", "/inbox.md", Host=host)[0] == 403, host
-    assert req("GET", "/inbox.md", Sec_Fetch_Site="cross-site")[0] == 403
-    assert req("GET", "/inbox.md", Sec_Fetch_Site="same-site")[0] == 403
-    assert req("GET", "/inbox.md", Sec_Fetch_Site="same-origin")[0] == 200
+    for site, want in (("cross-site", 403), ("same-site", 403), ("same-origin", 200)):
+      assert req("GET", "/inbox.md", Sec_Fetch_Site=site)[0] == want, site
     code, body = req("GET", "/pr.md?pr=o/r%231&lang=es")
     assert code == 200 and body.decode().startswith("# o/r#1\n") and "## Checks fallidos" in body.decode()
     assert req("GET", "/pr.md?pr=o/r")[0] == 400 and req("GET", "/pr.md")[0] == 400
@@ -1367,28 +1361,30 @@ def selftest():
     g["fetch"] = fail
     d = data()
     assert d["login"] is None and d["errorKind"] == "other" and len(calls) == n + 2
-    g["fetch"] = lambda: (calls.append(1), out)[1]
+    g["fetch"] = ok_fetch
     CONFIG.write_text(json.dumps({"future": 1, "account": {"host": "ghe.acme.dev", "user": "demo-work"}}))
 
     # MCP over stdio: both eras, notifications unanswered, tool failures as isError, nothing but JSON-RPC out.
     import io
     m = lambda version: {"_meta": {META + "protocolVersion": version, META + "clientCapabilities": {}}}
+    rq = lambda i, method, **params: {"jsonrpc": "2.0", "id": i, "method": method, **({"params": params} if params else {})}
+    tool = lambda i, name, args, **params: rq(i, "tools/call", name=name, arguments=args, **params)
     lines = [
-      {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t"}}},
+      rq(1, "initialize", protocolVersion="2025-06-18", capabilities={}, clientInfo={"name": "t"}),
       {"jsonrpc": "2.0", "method": "notifications/initialized"},
-      {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-      {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_inbox", "arguments": {"sections": ["approved"]}}},
-      {"jsonrpc": "2.0", "id": 4, "method": "initialize", "params": {"protocolVersion": "2099-01-01"}},
-      {"jsonrpc": "2.0", "id": 5, "method": "server/discover", "params": m("2026-07-28")},
-      {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "get_pr", "arguments": {"pr": "o/r#1"}, **m("2026-07-28")}},
-      {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "get_pr", "arguments": {"pr": "nope"}, **m("2026-07-28")}},
-      {"jsonrpc": "2.0", "id": 8, "method": "tools/list", "params": m("1900-01-01")},
-      {"jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": {"_meta": {META + "protocolVersion": "2026-07-28"}}},
-      {"jsonrpc": "2.0", "id": 10, "method": "server/discover"},
-      {"jsonrpc": "2.0", "id": 11, "method": "tools/call", "params": {"name": "nope"}},
-      {"jsonrpc": "2.0", "id": 12, "method": "resources/list"},
-      {"jsonrpc": "2.0", "id": 13, "method": "ping"},
-      {"jsonrpc": "2.0", "id": 14, "method": "tools/call", "params": {"name": "list_inbox", "arguments": {"sections": "review"}}},
+      rq(2, "tools/list"),
+      tool(3, "list_inbox", {"sections": ["approved"]}),
+      rq(4, "initialize", protocolVersion="2099-01-01"),
+      rq(5, "server/discover", **m("2026-07-28")),
+      tool(6, "get_pr", {"pr": "o/r#1"}, **m("2026-07-28")),
+      tool(7, "get_pr", {"pr": "nope"}, **m("2026-07-28")),
+      rq(8, "tools/list", **m("1900-01-01")),
+      rq(9, "tools/list", _meta={META + "protocolVersion": "2026-07-28"}),
+      rq(10, "server/discover"),
+      rq(11, "tools/call", name="nope"),
+      rq(12, "resources/list"),
+      rq(13, "ping"),
+      tool(14, "list_inbox", {"sections": "review"}),
       {"jsonrpc": "2.0", "id": 15, "result": {}},
     ]
     sink = io.StringIO()
