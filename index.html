@@ -89,13 +89,25 @@ kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px sol
 /* repo picker + banner */
 .pop{position:fixed;inset:52px 16px auto auto;margin:0;width:320px;max-width:calc(100vw - 32px);max-height:min(70vh,560px);overflow:auto;padding:6px;
   border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);box-shadow:0 20px 50px -12px rgba(0,0,0,.4)}
-.pop-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 8px;font-size:12px;color:var(--faint)}
-.pop-h button{white-space:nowrap;border:0;background:none;color:var(--accent);cursor:pointer;font-size:12px;padding:0}
+.pop-h{display:flex;align-items:center;gap:4px;padding:2px 2px 4px}
+.pop-h input{flex:1;min-width:0;height:28px;margin-right:4px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit}
+.pop-h input:focus{outline:none;border-color:var(--accent)}
+.pop-h button{height:26px;padding:0 8px;border:0;border-radius:6px;background:none;color:var(--accent);cursor:pointer;font-size:12px;font-weight:550;white-space:nowrap}
+.pop-h button:hover{background:var(--hover)}
+.pop-h button:first-of-type{margin-left:auto}
+.pop-note{margin:0;padding:0 8px 6px;font-size:12px;color:var(--faint)}
+.owner summary{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;list-style:none;font-weight:600;font-size:12.5px}
+.owner summary::-webkit-details-marker{display:none}
+.owner summary:hover{background:var(--hover)}
+.owner summary input{accent-color:var(--accent);margin:0}
+.owner summary span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.owner summary b{font-weight:500;color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
+.owner[open] .chev{transform:rotate(90deg)}
+.owner .repo-opt{padding-left:30px}
 .repo-opt{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer}
 .repo-opt:hover{background:var(--hover)}
 .repo-opt input{accent-color:var(--accent);margin:0}
 .repo-opt span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.repo-opt em{font-style:normal;color:var(--faint)}
 .repo-opt b{font-weight:500;color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
 #repos-btn[data-filtered]{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
 .banner{display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;padding:8px 12px;border-radius:8px;font-size:13px;
@@ -299,7 +311,11 @@ dialog form{margin-top:16px;text-align:right}
   <form method="dialog"><button class="btn" autofocus data-i18n="done"></button></form>
 </dialog>
 <div class="pop" id="repos" popover data-i18n-attr="aria-label:reposTip">
-  <div class="pop-h"><span data-i18n="hiddenNote"></span><button type="button" data-show-all data-i18n="showAll"></button></div>
+  <div class="pop-h">
+    <input id="repo-q" type="search" data-i18n-attr="placeholder:filterRepos,aria-label:filterRepos" autocomplete="off" spellcheck="false" hidden>
+    <button type="button" data-repos="all" data-i18n="all"></button><button type="button" data-repos="none" data-i18n="noneBtn"></button>
+  </div>
+  <p class="pop-note" data-i18n="hiddenNote"></p>
   <div id="repo-list"></div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -316,7 +332,8 @@ const T = {
     skip: 'Skip to content', home: 'Pudú, home', filter: 'Filter PRs', filterTip: 'Searches title, repo, author, number, branch and labels',
     reposTip: 'Choose which repos to show', copyAllTip: 'Copy everything visible as text (Y)', refreshTip: 'Refresh now (r)',
     themeTip: 'Toggle theme (t)', helpTip: 'Keyboard shortcuts (?)', sections: 'Sections', connecting: 'Connecting to GitHub…',
-    forClaude: 'For Claude:', shortcuts: 'Keyboard shortcuts', done: 'Done', hiddenNote: "Hidden repos don't count or notify.", showAll: 'Show all',
+    forClaude: 'For Claude:', shortcuts: 'Keyboard shortcuts', done: 'Done', hiddenNote: "Hidden repos don't count or notify. Alt-click keeps only that one.", all: 'All', noneBtn: 'None', filterRepos: 'Filter repos',
+    ownerAll: o => `All repos in ${o}`,
     s_review: 'Needs your review', s_returned: 'Needs your attention', s_approved: 'Approved', s_waiting: 'Waiting for review',
     s_draft: 'Drafts', s_merged: 'Merged this week', s_bots: 'Bots',
     n_review: 'Review requested', n_returned: 'Your PR needs attention', n_approved: 'Your PR was approved',
@@ -328,7 +345,7 @@ const T = {
     notifOn: 'Desktop notifications on', notifOff: 'Turn on desktop notifications', notifUnsupported: "This browser doesn't support notifications",
     notifBlocked: 'The browser blocked notifications', notifyYes: "I'll tell you when something new arrives", notifyNo: 'Notifications off',
     k_move: 'Move down and up between PRs', k_open: 'Open the PR on GitHub', k_copy: 'Copy the PR as text', k_copyAll: 'Copy everything visible as text',
-    k_branch: "Copy the PR's branch", k_checkout: 'Copy <code>gh pr checkout</code>', k_filter: 'Filter', k_refresh: 'Refresh, skipping the cache',
+    k_branch: "Copy the PR's branch", k_checkout: 'Copy <code>gh pr checkout</code>', k_filter: 'Filter', k_repos: 'Choose which repos to show', k_refresh: 'Refresh, skipping the cache',
     k_theme: 'Switch between light and dark', k_esc: 'Clear the filter or close', k_help: 'Show this help',
     r_APPROVED: l => `${l} approved`, r_CHANGES_REQUESTED: l => `${l} requested changes`, r_COMMENTED: l => `${l} commented`, r_DISMISSED: l => `${l}'s review was dismissed`,
     pendYou: 'Waiting for your review', pendOf: l => `Waiting for ${l}'s review`,
@@ -363,7 +380,8 @@ const T = {
     skip: 'Saltar al contenido', home: 'Pudú, inicio', filter: 'Filtrar PRs', filterTip: 'Busca en título, repo, autor, número, rama y labels',
     reposTip: 'Elegir qué repos se muestran', copyAllTip: 'Copiar todo lo visible como texto (Y)', refreshTip: 'Refrescar ahora (r)',
     themeTip: 'Cambiar tema (t)', helpTip: 'Atajos de teclado (?)', sections: 'Secciones', connecting: 'Conectando con GitHub…',
-    forClaude: 'Para Claude:', shortcuts: 'Atajos de teclado', done: 'Listo', hiddenNote: 'Los repos ocultos no cuentan ni notifican.', showAll: 'Mostrar todos',
+    forClaude: 'Para Claude:', shortcuts: 'Atajos de teclado', done: 'Listo', hiddenNote: 'Los repos ocultos no cuentan ni notifican. Alt-clic deja solo ese.', all: 'Todos', noneBtn: 'Ninguno', filterRepos: 'Filtrar repos',
+    ownerAll: o => `Todos los repos de ${o}`,
     s_review: 'Necesitan tu review', s_returned: 'Necesitan tu atención', s_approved: 'Aprobados', s_waiting: 'Esperando review',
     s_draft: 'Drafts', s_merged: 'Mergeados esta semana', s_bots: 'Bots',
     n_review: 'Te pidieron review', n_returned: 'Tu PR necesita atención', n_approved: 'Aprobaron tu PR',
@@ -375,7 +393,7 @@ const T = {
     notifOn: 'Notificaciones de escritorio activadas', notifOff: 'Activar notificaciones de escritorio', notifUnsupported: 'Este navegador no soporta notificaciones',
     notifBlocked: 'El navegador bloqueó las notificaciones', notifyYes: 'Te aviso cuando llegue algo nuevo', notifyNo: 'Notificaciones apagadas',
     k_move: 'Bajar y subir entre PRs', k_open: 'Abrir el PR en GitHub', k_copy: 'Copiar el PR como texto', k_copyAll: 'Copiar todo lo visible como texto',
-    k_branch: 'Copiar la rama del PR', k_checkout: 'Copiar <code>gh pr checkout</code>', k_filter: 'Filtrar', k_refresh: 'Refrescar sin caché',
+    k_branch: 'Copiar la rama del PR', k_checkout: 'Copiar <code>gh pr checkout</code>', k_filter: 'Filtrar', k_repos: 'Elegir qué repos se muestran', k_refresh: 'Refrescar sin caché',
     k_theme: 'Cambiar entre claro y oscuro', k_esc: 'Limpiar filtro o cerrar', k_help: 'Mostrar esta ayuda',
     r_APPROVED: l => `${l} aprobó`, r_CHANGES_REQUESTED: l => `${l} pidió cambios`, r_COMMENTED: l => `${l} comentó`, r_DISMISSED: l => `Review de ${l} descartada`,
     pendYou: 'Falta tu review', pendOf: l => `Falta la review de ${l}`,
@@ -473,7 +491,7 @@ const S = {
   seen: new Set(arr(store.get('seen', []))), seenSeeded: store.has('seen'),
   notify: store.get('notify', false) === true,
   closed: new Set(arr(store.get('closed', ['bots']))),
-  sel: null, retryTimer: null, visible: {}, cached: false, err: null,
+  sel: null, retryTimer: null, visible: {}, cached: false, err: null, hiddenWant: null,
 };
 
 /* time */
@@ -694,31 +712,105 @@ const SEARCH = {
 };
 const searchUrl = k => `https://github.com/search?type=pullrequests&q=${encodeURIComponent(SEARCH[k]())}`;
 
+// why: checkboxes show the pending choice while the POST is in flight, so a poll can't flip them back.
+const isHidden = r => S.hiddenWant ? S.hiddenWant.has(r.repo) : !!r.hidden;
+const byName = (a, b) => a.localeCompare(b, undefined, {sensitivity: 'base'});
+let repoSig = '';
 function renderRepos() {
-  const repos = arr(S.data?.repos), hidden = repos.filter(r => r.hidden).length;
+  const repos = arr(S.data?.repos), hidden = repos.filter(isHidden).length;
   const btn = $('#repos-btn');
   btn.innerHTML = `${ico('repo')}<span>${hidden ? t('someRepos', repos.length - hidden, repos.length) : t('allRepos')}</span>${ico('down')}`;
   btn.toggleAttribute('data-filtered', hidden > 0);
-  $('#repo-list').innerHTML = repos.map(r => {
-    const [owner, name] = r.repo.includes('/') ? r.repo.split('/') : ['', r.repo];
-    return `<label class="repo-opt" title="${esc(r.repo)}"><input type="checkbox" data-repo="${esc(r.repo)}" ${r.hidden ? '' : 'checked'}>`
-      + `<span><em>${esc(owner)}/</em>${esc(name)}</span><b>${r.count}</b></label>`;
-  }).join('');
-}
-async function setHidden(hidden) {
-  try {
-    const r = await fetch(`/api/hidden?lang=${LANG}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({hidden})});
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d = await r.json();
-    if (!d?.login) return;
-    S.data = d;
-    store.set('snap', d);
-    render();
-  } catch (e) {
-    toast(`${t('saveReposFail')} <code>${esc(e.message)}</code>`);
-    render();
+  // why: rebuilding on every toggle or poll drops keyboard focus inside the popover; only a new repo set rebuilds.
+  const sig = repos.map(r => r.repo).join();
+  if (sig !== repoSig) {
+    repoSig = sig;
+    const groups = {};
+    for (const r of repos) { const i = r.repo.indexOf('/'); (groups[i < 0 ? '' : r.repo.slice(0, i)] ||= []).push(r); }
+    $('#repo-list').innerHTML = Object.keys(groups).sort(byName).map(o => `<details class="owner" open><summary>`
+      + `<input type="checkbox" data-owner="${esc(o)}" aria-label="${esc(t('ownerAll', o))}"><span>${esc(o)}</span><b></b>${ico('chev', 'chev')}</summary>`
+      + groups[o].sort((a, b) => byName(a.repo, b.repo)).map(r => `<label class="repo-opt" title="${esc(r.repo)}" data-name="${esc(r.repo.toLowerCase())}">`
+        + `<input type="checkbox" data-repo="${esc(r.repo)}"><span>${esc(o ? r.repo.slice(o.length + 1) : r.repo)}</span><b></b></label>`).join('')
+      + '</details>').join('');
+    $('#repo-q').hidden = repos.length <= 8;
+    filterRepos();
+  }
+  const by = new Map(repos.map(r => [r.repo, r]));
+  for (const g of document.querySelectorAll('#repo-list .owner')) {
+    let on = 0, n = 0, count = 0;
+    for (const i of g.querySelectorAll('[data-repo]')) {
+      const r = by.get(i.dataset.repo);
+      i.checked = !isHidden(r);
+      i.nextElementSibling.nextElementSibling.textContent = r.count;
+      on += i.checked; n++; count += Number(r.count) || 0;
+    }
+    const o = g.querySelector('[data-owner]');
+    o.checked = on === n;
+    o.indeterminate = on > 0 && on < n;
+    g.querySelector('summary b').textContent = count;
   }
 }
+function filterRepos() {
+  const q = $('#repo-q').value.trim().toLowerCase();
+  for (const l of document.querySelectorAll('#repo-list .repo-opt')) l.hidden = !!q && !l.dataset.name.includes(q);
+  for (const g of document.querySelectorAll('#repo-list .owner')) { g.hidden = !g.querySelector('.repo-opt:not([hidden])'); if (q) g.open = true; }
+}
+const repoBoxes = (root = $('#repo-list')) => [...root.querySelectorAll('.repo-opt:not([hidden]) [data-repo]')];
+let hideTimer, hideBusy = false, hideAgain = false;
+function setHidden(list) {
+  S.hiddenWant = new Set(list);
+  renderRepos();
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(flushHidden, 300);
+}
+// why: one POST at a time and only the newest choice is applied, so fast clicking can't land out of order.
+async function flushHidden() {
+  if (hideBusy) { hideAgain = true; return; }
+  hideBusy = true;
+  const want = S.hiddenWant;
+  try {
+    const r = await fetch(`/api/hidden?lang=${LANG}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({hidden: [...want]})});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (S.hiddenWant === want) {
+      S.hiddenWant = null;
+      if (d?.login) { S.data = d; store.set('snap', d); }
+      render();
+    }
+  } catch (e) {
+    toast(`${t('saveReposFail')} <code>${esc(e.message)}</code>`);
+    if (S.hiddenWant === want) { S.hiddenWant = null; render(); }
+  } finally {
+    hideBusy = false;
+    if (hideAgain) { hideAgain = false; flushHidden(); }
+  }
+}
+const currentHidden = () => arr(S.data?.repos).filter(isHidden).map(r => r.repo);
+$('#repo-list').addEventListener('change', e => {
+  const o = e.target.dataset.owner;
+  if (o != null) for (const i of repoBoxes(e.target.closest('.owner'))) i.checked = e.target.checked;
+  const shown = new Set(repoBoxes().map(i => i.dataset.repo));
+  // why: repos filtered out of view keep their state; only what's on screen comes from the checkboxes.
+  setHidden([...currentHidden().filter(r => !shown.has(r)), ...repoBoxes().filter(i => !i.checked).map(i => i.dataset.repo)]);
+});
+$('#repo-list').addEventListener('click', e => {
+  const i = e.target.closest('input');
+  if (!i || !e.altKey) return;
+  e.preventDefault();
+  const keep = new Set(i.dataset.repo ? [i.dataset.repo] : repoBoxes(i.closest('.owner')).map(x => x.dataset.repo));
+  setHidden(arr(S.data?.repos).map(r => r.repo).filter(r => !keep.has(r)));
+});
+$('#repos').addEventListener('click', e => {
+  const b = e.target.closest('[data-repos]');
+  if (!b) return;
+  const shown = new Set(repoBoxes().map(i => i.dataset.repo)), rest = currentHidden().filter(r => !shown.has(r));
+  setHidden(b.dataset.repos === 'all' ? rest : [...rest, ...shown]);
+});
+$('#repo-q').addEventListener('input', filterRepos);
+$('#repos').addEventListener('toggle', e => {
+  if (e.newState === 'open') ($('#repo-q').hidden ? $('#repo-list input') : $('#repo-q'))?.focus();
+  else { $('#repo-q').value = ''; filterRepos(); }
+});
 
 function renderChrome() {
   const d = S.data;
@@ -956,6 +1048,7 @@ document.addEventListener('keydown', e => {
   else if (k === '/') { e.preventDefault(); $('#q').focus(); $('#q').select(); }
   else if (k === 'r') load(true);
   else if (k === 't') toggleTheme();
+  else if (k === 'p') { if (S.data) { e.preventDefault(); $('#repos').togglePopover(); } }
   else if (k === '?') $('#help').showModal();
   else if (k === 'Escape') { if (S.q) setQuery(''); else { document.querySelectorAll('.pr.sel').forEach(x => x.classList.remove('sel')); S.sel = null; document.activeElement?.blur(); } }
 });
@@ -979,7 +1072,6 @@ document.addEventListener('click', e => {
     copy(sectionText(sec) + filterNote() + '\n', t('asText', sec.title));
     return;
   }
-  if (t.closest('[data-show-all]')) { setHidden([]); return; }
   const nav = t.closest('.nav a');
   if (nav) { const d = $(`#sec-${nav.dataset.sec}`); if (d?.tagName === 'DETAILS' && !d.open) d.open = true; }
   if (t.closest('[data-action="retry"]')) load(true);
@@ -992,9 +1084,6 @@ document.addEventListener('toggle', e => {
   e.target.open ? S.closed.delete(id) : S.closed.add(id);
   store.set('closed', [...S.closed]);
 }, true);
-$('#repo-list').addEventListener('change', () => {
-  setHidden([...document.querySelectorAll('#repo-list input:not(:checked)')].map(i => i.dataset.repo));
-});
 $('#copy-all').addEventListener('click', copyAll);
 $('#refresh').addEventListener('click', () => load(true));
 $('#theme').addEventListener('click', toggleTheme);
@@ -1011,7 +1100,7 @@ addEventListener('focus', () => { if (Date.now() - S.lastLoad > FOCUS_MIN_GAP_MS
 for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
 for (const el of document.querySelectorAll('[data-i18n-attr]')) for (const pair of el.dataset.i18nAttr.split(',')) { const [a, k] = pair.split(':'); el.setAttribute(a, t(k)); }
 $('#keys').innerHTML = [['j k', 'move'], ['o Enter', 'open'], ['y', 'copy'], ['Y', 'copyAll'], ['c', 'branch'], ['g', 'checkout'], ['/', 'filter'],
-  ['r', 'refresh'], ['t', 'theme'], ['Esc', 'esc'], ['?', 'help']]
+  ['p', 'repos'], ['r', 'refresh'], ['t', 'theme'], ['Esc', 'esc'], ['?', 'help']]
   .map(([keys, k]) => `<dt>${keys.split(' ').map(x => `<kbd>${esc(x)}</kbd>`).join('')}</dt><dd>${t('k_' + k)}</dd>`).join('');
 $('#curl').textContent = `curl -s ${location.host}/inbox.md`;
 paintTools();
