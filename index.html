@@ -94,9 +94,10 @@ kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px sol
 .nav a{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:7px;text-decoration:none;color:var(--muted)}
 .nav a:hover{background:var(--hover);color:var(--ink)}
 .nav a span{flex:1}
-.nav a b{font-weight:550;font-size:12px;font-variant-numeric:tabular-nums;color:var(--faint)}
+/* why: every count sits in the same centered box, so a filled badge lines up with the plain numbers. */
+.nav a b{min-width:22px;padding:2px 6px;border-radius:999px;text-align:center;font-weight:550;font-size:12px;font-variant-numeric:tabular-nums;color:var(--faint)}
 .nav a.hot{color:var(--ink)}
-.nav a.hot b{min-width:20px;text-align:center;padding:2px 6px;border-radius:999px;background:var(--accent);color:var(--accent-ink)}
+.nav a.hot b{background:var(--accent);color:var(--accent-ink)}
 .nav .gap{height:1px;margin:6px 10px;background:var(--line)}
 
 /* repo picker + banner */
@@ -168,7 +169,7 @@ div.sec .sec-h{cursor:default}
 .cols{height:30px;border-top:1px solid var(--line);color:var(--faint);font-size:12px}
 .cols .i{width:14px;height:14px}
 .cols .r{text-align:right}
-.cols :is(.c-ci,.c-dec,.c-mrg){text-align:center}
+.cols :is(.c-ci,.c-dec,.c-mrg,.c-people,.c-thr){text-align:center}
 .pr{position:relative;min-height:48px;border-top:1px solid var(--line-2);scroll-margin:60px 0 16px}
 .pr:hover{background:var(--hover)}
 .pr.sel{background:var(--sel);box-shadow:inset 2px 0 0 var(--accent)}
@@ -194,7 +195,7 @@ div.sec .sec-h{cursor:default}
 .tag .i{width:12px;height:12px}
 .tag code{font:11px var(--mono);max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .lbl i{width:7px;height:7px;border-radius:50%;background:var(--lc,var(--faint))}
-.people{display:flex;justify-content:flex-end;padding-left:6px}
+.people{display:flex;justify-content:center;padding-left:6px}
 .people .av{margin-left:-6px}
 .people .av img,.people .av .ini{border:2px solid var(--surface)}
 .pr:hover .people .av img,.pr:hover .people .av .ini{border-color:color-mix(in srgb,var(--ink) 3.5%,var(--surface))}
@@ -204,6 +205,7 @@ div.sec .sec-h{cursor:default}
 .av s{position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;border-radius:50%;display:grid;place-items:center;background:var(--c);color:var(--surface);border:1.5px solid var(--surface);text-decoration:none}
 .av s .i{width:7px;height:7px;stroke-width:4}
 .more{font-size:11px;color:var(--faint);margin-left:4px;align-self:center}
+.c-thr{display:flex;justify-content:center}
 .thr{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .thr .i{width:13px;height:13px}
 /* why: secondary glyphs stay unfilled so the one filled pill per row carries the verdict. */
@@ -294,6 +296,8 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
 @media (max-width:500px){
   .top{flex-wrap:wrap;height:auto;padding-block:8px;row-gap:8px}
   .search{order:9;flex-basis:100%;max-width:none}
+  /* why: phones have no keyboard to use shortcuts with, and the language button needs the room. */
+  #help-btn{display:none}
   html{scroll-padding-top:100px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -739,16 +743,16 @@ function row(p, sec, depth = 0) {
   return `<article class="pr row${S.sel === id ? ' sel' : ''}${depth ? ' kid' : ''}" data-id="${esc(id)}" data-key="${esc(k)}" data-ref="${esc(p.headRef || '')}"${depth ? ` style="--d:${Math.min(depth, 4)}"` : ''}>
     <span class="c-new">${dot(p)}</span>
     ${sec.mine ? '<span class="c-av"></span>' : avatar(p.author, p.authorAvatar, {cls: 'c-av'})}
-    <div class="body"${st.length ? '' : ' style="grid-column:span 2"'}>
+    <div class="body">
       <a class="t" href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">${esc(p.title || t('noTitle'))}${summary}</a>
       <div class="meta"><span class="num">#${esc(p.number)}</span><span class="repo" title="${esc(p.repo)}">${esc(repoName(p))}</span>`
       + `${sec.mine ? '' : `<span class="sep">·</span><span>${esc(p.author)}</span>`}${flags(p, sec, depth)}</div>
     </div>
-    ${st.length ? pill(st[0]) : ''}${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
+    ${st.length ? pill(st[0]) : '<span class="c-pill"></span>'}${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
     <span class="acts">${act('prompt', 'prompt', t('promptTip'))}${p.snoozedUntil ? act('unsnooze', 'x', t('unsnooze')) : act('snooze', 'clock', t('snoozeTip'))}</span>
   </article>`;
 }
-const colsHead = sec => `<div class="row cols" aria-hidden="true"><span class="c-new"></span><span class="c-av"></span>${sec.calm ? `<span style="grid-column:span 2">${t('title')}</span>` : `<span>${t('title')}</span><span class="c-pill">${t('status')}</span>`}<span class="c-people r">${t('reviewers')}</span><span class="c-thr">${ico('comment')}</span>
+const colsHead = sec => `<div class="row cols" aria-hidden="true"><span class="c-new"></span><span class="c-av"></span><span>${t('title')}</span><span class="c-pill">${sec.calm ? '' : t('status')}</span><span class="c-people">${t('reviewers')}</span><span class="c-thr">${ico('comment')}</span>
   <span class="c-ci">${t('h_ci')}</span><span class="c-dec">${t('h_review')}</span><span class="c-mrg">${sec.calm ? '' : t('h_merge')}</span>
   <span class="c-size r">${t('changes')}</span><span class="c-time r">${t(sec.when === 'wait' ? 'waitCol' : sec.when === 'merged' ? 'merged' : 'updated')}</span></div>`;
 
