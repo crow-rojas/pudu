@@ -8,31 +8,48 @@ All notable changes to Pudú are documented here. The format is based on
 
 ### Added
 
-- English UI, with Spanish picked automatically from the browser language. The markdown endpoints
-  follow `?lang=en|es` (default from `PUDU_LANG`).
-- Demo mode (`python3 server.py --demo` or `PUDU_DEMO=1`): realistic fixture data without `gh`, for
-  screenshots and for contributors without a GitHub session.
-- First-run empty states and clear errors when `gh` is missing, logged out, rate limited or offline.
-- Re-review detection: PRs you already reviewed that got new commits come back to your queue.
-- Search and per-org groups in the repo picker.
-- Snooze a PR until a date; it wakes early if the PR changes.
-- Custom sections from any GitHub search query, configured in `config.json`.
-- Stacked PRs: a PR based on another PR in the inbox shows which one it sits on top of.
-- Account switcher across every account and host logged in to `gh`.
-- MCP server (`python3 server.py --mcp`) with read-only `list_inbox` and `get_pr` tools, and
-  `/pr.md` with failed checks, unresolved threads and ready-to-run `gh` commands for one PR.
-- Linux install: a systemd user service plus a desktop launcher (`install.sh` on Linux).
-- Merge queue position and auto-merge state on PRs.
+- English UI, with Spanish picked automatically from the browser language. The markdown follows
+  `?lang=en|es`, with the default from `PUDU_LANG`.
+- Demo mode (`python3 server.py --demo` or `PUDU_DEMO=1`): fixture PRs through the real pipeline,
+  without `gh`, for screenshots and for contributors without a GitHub session.
+- First-run empty states with a fix for each failure (`gh` missing, signed out, rate limited,
+  offline), driven by a new `errorKind` field in `/api/data`.
+- Re-review detection: PRs you already reviewed that got new commits come back to "Needs your review".
+- Truncation hints: when GitHub has more results than Pudú fetched, the section says "100 of 134"
+  and links to the full search. `/api/data` reports it in `truncated`.
+- Repo picker that scales: repos grouped by owner with a toggle per owner, a filter box past 8 repos,
+  and the `p` shortcut.
+- Shortcuts: `[` and `]` jump between sections, `x` marks a PR as seen.
+- `/pr.md?pr=<url | owner/repo#N>`: one PR in depth, with failed checks and their links, unresolved
+  review threads flagged as untrusted text, and ready-to-run `gh pr checkout`, `diff` and `checks`.
+- MCP server over stdio (`python3 server.py --mcp`) with read-only `list_inbox` and `get_pr` tools.
+  It speaks both the `initialize` handshake and per-request protocol versions.
+- Snooze: `POST /api/snooze` hides a PR until a time, stored in `config.json`. A snoozed PR leaves
+  every section, the tab badge, notifications and the markdown, and wakes early on any activity.
+- Custom sections from any GitHub search, set in `config.json` under `sections`. They appear in
+  `/api/data` (`custom`), `/inbox.md` (also via `?s=<id>`) and the MCP tools, and a broken query
+  only fails its own section.
+- Accounts: Pudú lists every account and host logged in to `gh` (`accounts` in `/api/data`), and
+  `POST /api/account` or `account` in `config.json` runs `gh` as one of them, GitHub Enterprise
+  included.
+- PR fields `key`, `requestedVia`, `mergeQueue`, `autoMerge` and `stackParent`. The agent text says
+  "requested via team:x", "in merge queue (#2)", "auto-merge on" and "on top of #484".
+- `staleHours` in `config.json`, returned as `settings.staleHours`.
+- Linux install: a systemd user service plus a desktop launcher. On WSL the launcher is skipped.
 - CI on Linux and macOS with Python 3.9 and the latest Python, plus shellcheck for `install.sh`.
 - Issue and PR templates, `SECURITY.md` and this changelog.
 
 ### Changed
 
-- Redesigned PR rows with a single status pill summarizing CI, review and conflicts.
+- PR rows lead with one status pill, worst first, summarizing conflicts, CI, review and threads.
 - "Needs your attention" replaces "Changes requested": it also catches failing CI, merge conflicts
-  and unresolved threads on your PRs.
+  and unresolved threads on your PRs. When `reviewDecision` is empty, the latest reviews decide.
+- Quieter section headers: the copy button shows on hover.
+- `force=1` is ignored when the last fetch is under 5 seconds old.
 - `install.sh` pins the `python3` and `gh` found in your shell, so pyenv, mise and `~/.local/bin`
-  setups work under launchd.
+  setups work under launchd and systemd. The server also looks for `gh` in the Homebrew and
+  Linuxbrew directories when started with a bare `PATH` (Dock, MCP hosts).
+- Shortcuts no longer fire while the repo picker is open.
 
 ### Fixed
 
@@ -40,12 +57,19 @@ All notable changes to Pudú are documented here. The format is based on
   bootstrap while the old agent shuts down, refuses to install when the port is taken, honors `PORT`,
   and works from paths with spaces.
 - A GraphQL response with partial errors still shows the PRs that came back.
-- The config file is written atomically under a lock, so concurrent writes can't corrupt it.
+- A `gh` 502 reports `gh`'s error instead of a JSON parse error.
+- GitHub Enterprise versions without merge queue no longer fail the whole query.
+- "error connecting to" is classified as a network error.
+- Your own PRs are never flagged as re-reviews.
+- The config file is written atomically under a lock, keeping keys Pudú doesn't know.
+- Rejected POSTs get their 4xx reply instead of a connection reset.
+- Faint text meets WCAG AA contrast in both themes.
 
 ### Security
 
 - Requests with an unexpected `Host` header are rejected (DNS rebinding).
 - Cross-site requests are rejected using `Sec-Fetch-Site` (CSRF).
+- POST bodies with an invalid or oversized `Content-Length` are rejected.
 
 ## [0.1.0] - 2026-10-20
 
