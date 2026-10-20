@@ -17,6 +17,9 @@ HERE = Path(__file__).parent
 CONFIG = Path(os.environ.get("PUDU_CONFIG") or Path.home() / ".config" / "pudu" / "config.json")
 # why: several open tabs share one gh call instead of each burning GraphQL rate limit.
 CACHE_SECONDS = 20
+# why: a held-down refresh key or a looping script can't turn force=1 into a gh call per request.
+FORCE_MIN_SECONDS = 5
+MAX_BODY = 1_000_000
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"}
 
 QUERY = """
@@ -297,11 +300,13 @@ def view(d, hidden):
 
 def data(force=False):
   with _lock:
-    if force or time.time() - _cache["at"] > CACHE_SECONDS:
+    age = time.time() - _cache["at"]
+    if (force and age >= FORCE_MIN_SECONDS) or age > CACHE_SECONDS:
       try:
-        _cache.update(at=time.time(), data=fetch(), error=None)
+        _cache.update(data=fetch(), error=None)
       except Exception as e:  # why: a network blip keeps showing the last good snapshot, flagged.
-        _cache.update(at=time.time(), error=str(e))
+        _cache.update(error=str(e))
+      _cache["at"] = time.time()
     return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"]}, hidden_repos())
 
 
@@ -309,7 +314,21 @@ MISSING_FRONTEND = "<!doctype html><meta charset=utf-8><title>Pudú</title><p>Fa
 
 
 class Handler(BaseHTTPRequestHandler):
+  # why: the Host allowlist stops DNS rebinding and Sec-Fetch-Site stops other sites' pages; curl sends no Sec-Fetch-Site.
+  def _allowed(self):
+    hosts = {f"{h}:{self.server.server_port}" for h in ("localhost", "127.0.0.1", "[::1]")}
+    return (self.headers.get("Host") or "").lower() in hosts and self.headers.get("Sec-Fetch-Site") in (None, "same-origin", "none")
+
+  def _body(self):
+    try:
+      n = int(self.headers.get("Content-Length") or 0)
+    except ValueError:
+      n = -1
+    return self.rfile.read(n) if 0 <= n <= MAX_BODY else None
+
   def do_GET(self):
+    if not self._allowed():
+      return self._send(403, "text/plain", b"forbidden")
     url = urlsplit(self.path)
     if url.path == "/api/data":
       force = parse_qs(url.query).get("force") == ["1"]
@@ -331,11 +350,16 @@ class Handler(BaseHTTPRequestHandler):
       self._send(404, "text/plain", b"not found")
 
   def do_POST(self):
+    if not self._allowed():
+      return self._send(403, "text/plain", b"forbidden")
     # why: demanding JSON forces a CORS preflight, so another web page can't rewrite the config.
     if urlsplit(self.path).path != "/api/hidden" or not self.headers.get("Content-Type", "").startswith("application/json"):
       return self._send(404, "text/plain", b"not found")
+    body = self._body()
+    if body is None:
+      return self._send(400, "text/plain", b"bad request")
     try:
-      repos = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))["hidden"]
+      repos = json.loads(body)["hidden"]
     except (ValueError, KeyError, TypeError):
       repos = None
     if not isinstance(repos, list) or len(repos) > 1000 or not all(isinstance(r, str) and 0 < len(r) < 200 for r in repos):
