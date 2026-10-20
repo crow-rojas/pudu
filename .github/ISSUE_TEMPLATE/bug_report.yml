@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Pudú doesn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Redact private data.** Logs and screenshots can contain names of private repos, PRs and people.
+        If you can, reproduce with fixture data instead: `python3 server.py --demo`.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      placeholder: Steps to reproduce, what you saw, what you expected to see.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS 15.5 / Ubuntu 24.04 / WSL2
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: "`python3 --version`"
+    validations:
+      required: true
+  - type: input
+    id: gh
+    attributes:
+      label: gh version
+      description: "`gh --version`"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Last lines of the server log, redacted:
+        - macOS (installed service): `tail -n 50 ~/Library/Logs/pudu.log`
+        - Linux (installed service): `journalctl --user -u pudu -n 50`
+        - Run by hand: the terminal output of `python3 server.py`
+      render: text

@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest something Pudú should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Pudú stays small on purpose (no dependencies, no build, everything local), so the problem matters more than the solution.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem do you want to solve?
+      placeholder: What you're trying to do today and where Pudú gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to happen?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds you've tried
