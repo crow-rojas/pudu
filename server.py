@@ -532,13 +532,14 @@ class Handler(BaseHTTPRequestHandler):
       self._send(404, "text/plain", b"not found")
 
   def do_POST(self):
+    # why: read the body before any rejection; closing with unread bytes makes the kernel send a RST instead of our reply.
+    body = self._body()
     if not self._allowed():
       return self._send(403, "text/plain", b"forbidden")
     # why: demanding JSON forces a CORS preflight, so another web page can't rewrite the config.
     url = urlsplit(self.path)
     if url.path != "/api/hidden" or not self.headers.get("Content-Type", "").startswith("application/json"):
       return self._send(404, "text/plain", b"not found")
-    body = self._body()
     if body is None:
       return self._send(400, "text/plain", b"bad request")
     try:
