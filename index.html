@@ -71,7 +71,19 @@ kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px sol
 .btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:12.5px;font-weight:550;color:var(--muted);white-space:nowrap}
 .btn:hover{color:var(--ink);border-color:var(--faint)}
 .btn .i{width:14px;height:14px}
-.me{width:26px;height:26px;border-radius:50%;margin-left:6px;background:var(--surface-2)}
+.me{display:block;width:26px;height:26px;border-radius:50%;background:var(--surface-2)}
+.me-ini{display:none;width:26px;height:26px;border-radius:50%;place-items:center;background:var(--surface-2);font:650 11px/1 var(--font);color:var(--muted);text-transform:uppercase}
+.me:not([src]) + .me-ini:not(:empty){display:grid}
+.acct{margin-left:6px;padding:0;border:0;border-radius:50%;background:none;cursor:pointer}
+.acct:disabled{cursor:default}
+.acct:not(:disabled):hover :is(.me,.me-ini){box-shadow:0 0 0 2px var(--line)}
+#accts{width:280px}
+#accts .pop-note{padding:4px 8px 6px}
+#acct-list button{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 8px;border:0;border-radius:6px;background:none;cursor:pointer;text-align:left}
+#acct-list button:is(:hover,:focus-visible){background:var(--hover)}
+#acct-list .ck{display:grid;width:16px;color:var(--accent)}
+#acct-list span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#acct-list b{font-weight:400;color:var(--faint)}
 .me:not([src]){display:none}
 
 /* shell */
@@ -303,7 +315,7 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
     <button class="ib" id="notify" type="button" aria-pressed="false"></button>
     <button class="ib" id="theme" type="button" data-i18n-attr="aria-label:themeTip,title:themeTip"></button>
     <button class="ib" id="help-btn" type="button" data-i18n-attr="aria-label:helpTip,title:helpTip"></button>
-    <img class="me" id="me" alt="" width="26" height="26" referrerpolicy="no-referrer">
+    <button class="acct" id="acct-btn" type="button" popovertarget="accts" data-i18n-attr="aria-label:accountTip,title:accountTip" disabled><img class="me" id="me" alt="" width="26" height="26" referrerpolicy="no-referrer"><span class="me-ini" id="me-ini"></span></button>
   </div>
 </header>
 
@@ -334,6 +346,7 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
   <div id="snooze-opts"></div>
   <form id="snooze-form" class="snz-custom"><label class="sr" for="snooze-at" data-i18n="pickTime"></label><input type="datetime-local" id="snooze-at" required><button class="btn" data-i18n="snooze"></button></form>
 </dialog>
+<div class="pop" id="accts" popover data-i18n-attr="aria-label:accountTip"><p class="pop-note" data-i18n="accounts"></p><div id="acct-list"></div></div>
 <div class="pop" id="repos" popover data-i18n-attr="aria-label:reposTip">
   <div class="pop-h">
     <input id="repo-q" type="search" data-i18n-attr="placeholder:filterRepos,aria-label:filterRepos" autocomplete="off" spellcheck="false" hidden>
@@ -367,6 +380,7 @@ const T = {
     ap_merge: url => `Merge readiness check for ${url}: confirm CI is green, the branch is up to date with its base and no review thread is left open, then tell me whether it's safe to merge.`,
     ap_check: url => `Look over my PR ${url} and tell me what's still missing before it can merge.`,
     ap_start: (co, diff) => `Start with \`${co}\`, then \`${diff}\`.`, ap_more: c => `Detail (failed checks, open threads): \`${c}\``,
+    accountTip: 'Switch GitHub account', accounts: 'GitHub account', switching: w => `Switching to ${w}…`, switched: w => `Now showing ${w}`, switchFail: "Couldn't switch the account:",
     snoozedTil: (w, x) => `Snoozed ${w} until ${x}`, unsnoozed: w => `${w} is back in the inbox`, snoozeFail: "Couldn't snooze:", k_snooze: 'Snooze the PR, or unsnooze it',
     n_review: 'Review requested', n_returned: 'Your PR needs attention', n_approved: 'Your PR was approved', n_rereview: 'New commits on a PR you reviewed',
     justNow: 'just now', now: 'now', noTitle: '(no title)', none: '(none)', of: (a, b) => `${a} of ${b}`,
@@ -426,6 +440,7 @@ const T = {
     ap_merge: url => `Revisa si ${url} está listo para mergear: confirma que el CI está en verde, que la rama está al día con su base y que no quedan hilos abiertos; después dime si es seguro mergearlo.`,
     ap_check: url => `Revisa mi PR ${url} y dime qué le falta para poder mergearlo.`,
     ap_start: (co, diff) => `Empieza con \`${co}\` y luego \`${diff}\`.`, ap_more: c => `Detalle (checks fallidos, hilos abiertos): \`${c}\``,
+    accountTip: 'Cambiar de cuenta de GitHub', accounts: 'Cuenta de GitHub', switching: w => `Cambiando a ${w}…`, switched: w => `Ahora ves ${w}`, switchFail: 'No pude cambiar la cuenta:',
     snoozedTil: (w, x) => `${w} pospuesto hasta ${x}`, unsnoozed: w => `${w} volvió a la bandeja`, snoozeFail: 'No pude posponer:', k_snooze: 'Posponer el PR, o reactivarlo',
     n_review: 'Te pidieron review', n_returned: 'Tu PR necesita atención', n_approved: 'Aprobaron tu PR', n_rereview: 'Commits nuevos en un PR que revisaste',
     justNow: 'recién', now: 'ahora', noTitle: '(sin título)', none: '(ninguno)', of: (a, b) => `${a} de ${b}`,
@@ -925,8 +940,17 @@ function renderChrome() {
   setFavicon(urgent);
   const me = $('#me');
   if (safeUrl(d?.avatarUrl) && me.getAttribute('src') !== d.avatarUrl) { me.src = d.avatarUrl; me.alt = d.login || ''; }
+  $('#me-ini').textContent = String(d?.login || '').slice(0, 1);
   for (const id of ['#repos-btn', '#copy-all']) $(id).hidden = !d;
   paintBell();
+  // why: the switcher only exists when gh knows more than one account; data.account is the one Pudú uses.
+  const accts = arr(d?.accounts).filter(a => a?.host && a?.user), cur = d?.account || {};
+  $('#acct-btn').disabled = accts.length < 2;
+  const list = accts.length < 2 ? '' : accts.map(a => {
+    const on = a.host === cur.host && a.user === cur.user;
+    return `<button type="button" aria-pressed="${on}" data-host="${esc(a.host)}" data-user="${esc(a.user)}"><span class="ck">${on ? ico('check') : ''}</span><span>${esc(a.user)}<b>@${esc(a.host)}</b></span></button>`;
+  }).join('');
+  if ($('#acct-list').dataset.html !== list) { $('#acct-list').innerHTML = list; $('#acct-list').dataset.html = list; }
   const b = $('#banner'), e = S.err;
   let msg = '';
   if (S.netError && d) msg = S.netRaw ? `${t('badReply')} <details><summary>${t('details')}</summary><code>${esc(S.netRaw)}</code></details>` : t('noServer', `<code>${esc(S.netError)}</code>`);
@@ -1158,6 +1182,28 @@ function copyAll() {
   if (!S.data) return;
   copy(allText(), t('wholeInbox'));
 }
+
+/* account */
+async function switchAccount(host, user) {
+  $('#accts').hidePopover();
+  const who = `${user}@${host}`, cur = S.data?.account;
+  if (cur && cur.host === host && cur.user === user) return;
+  document.body.classList.add('loading');
+  $('#app').setAttribute('aria-busy', 'true');
+  toast(t('switching', esc(who)));
+  try {
+    const d = await save('/api/account', {host, user});
+    // why: another account's PRs are not "new"; seed them as seen like a first visit.
+    S.seenSeeded = false;
+    if (apply(d)) toast(t('switched', esc(who)));
+  } catch (e) { toast(`${t('switchFail')} <code>${esc(e.message)}</code>`); }
+  finally {
+    if (!S.loading) document.body.classList.remove('loading');
+    $('#app').setAttribute('aria-busy', 'false');
+  }
+}
+$('#acct-list').addEventListener('click', e => { const b = e.target.closest('[data-host]'); if (b) switchAccount(b.dataset.host, b.dataset.user); });
+$('#accts').addEventListener('toggle', e => { if (e.newState === 'open') ($('#acct-list [aria-pressed="false"]') || $('#acct-list button'))?.focus(); });
 
 /* snooze */
 const at9 = days => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(9, 0, 0, 0); return d.getTime(); };
