@@ -74,7 +74,7 @@ EMPTY = {
 # why: readers wait on a running fetch instead of starting their own; that wait is what dedupes gh calls.
 _lock = threading.Lock()
 _config_lock = threading.Lock()
-_cache = {"at": 0.0, "data": None, "error": None, "errorKind": None}
+_cache = {"at": 0.0, "data": None, "error": None, "errorKind": None, "account": None}
 # why: the UI shows a fix per kind (install gh, gh auth login, wait, check the network) instead of raw stderr.
 ERROR_KINDS = [
   ("gh_auth", ("gh auth login", "http 401", "authentication", "bad credentials")),
@@ -664,6 +664,10 @@ def current_account(c, accounts):
 
 def data(force=False, lang="en"):
   with _lock:
+    c = read_config()
+    # why: a snapshot fetched as another account (or switched mid-fetch) is dropped, never served as stale data.
+    if config_account(c) != _cache["account"]:
+      _cache.update(at=0.0, data=None, account=config_account(c))
     age = time.time() - _cache["at"]
     if (force and age >= FORCE_MIN_SECONDS) or age > CACHE_SECONDS:
       try:
@@ -673,7 +677,6 @@ def data(force=False, lang="en"):
         if _cache["errorKind"] == "gh_auth":
           _tokens.clear()
       _cache["at"] = time.time()
-    c = read_config()
     if DEMO:
       c = {"snoozed": {"octo-labs/docs#212": {"until": iso_at(STARTED + 20 * 3600), "updatedAt": "9999"}}, **c}
     return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"], "errorKind": _cache["errorKind"]}, c, lang)
@@ -1347,6 +1350,16 @@ def selftest():
     code, body = js("/api/account", {"host": "ghe.acme.dev", "user": "demo-work"})
     assert code == 200 and json.loads(body)["account"] == {"host": "ghe.acme.dev", "user": "demo-work"} and len(calls) == n + 1
     assert json.loads(CONFIG.read_text()) == {"future": 1, "account": {"host": "ghe.acme.dev", "user": "demo-work"}}
+    # a switch that lands while a fetch is in flight: the snapshot labelled with the old account is never served.
+    CONFIG.write_text(json.dumps({"future": 1, "account": {"host": "github.com", "user": "crow-demo"}}))
+    def fail():
+      calls.append(1)
+      raise RuntimeError("HTTP 502")
+    g["fetch"] = fail
+    d = data()
+    assert d["login"] is None and d["errorKind"] == "other" and len(calls) == n + 2
+    g["fetch"] = lambda: (calls.append(1), out)[1]
+    CONFIG.write_text(json.dumps({"future": 1, "account": {"host": "ghe.acme.dev", "user": "demo-work"}}))
 
     # MCP over stdio: both eras, notifications unanswered, tool failures as isError, nothing but JSON-RPC out.
     import io
