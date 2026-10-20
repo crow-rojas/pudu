@@ -2,11 +2,22 @@ name: test
 on: [push, pull_request]
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.x"]
+    runs-on: ${{ matrix.os }}
+    env:
+      # why: setup-python has no 3.9 build for macos-latest (arm64); the system python3 there is 3.9, the version we target.
+      PY: ${{ matrix.os == 'macos-latest' && matrix.python == '3.9' && '/usr/bin/python3' || 'python3' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        if: env.PY == 'python3'
         with:
-          python-version: "3.x"
-      - run: python3 server.py --test
+          python-version: ${{ matrix.python }}
+      - run: $PY --version && $PY server.py --test
       - run: bash -n install.sh
+      - run: shellcheck install.sh
+        if: runner.os == 'Linux'
