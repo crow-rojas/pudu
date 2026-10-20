@@ -3,6 +3,7 @@
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -65,6 +66,7 @@ EMPTY = {
   "mine": {"returned": [], "approved": [], "waiting": [], "draft": []},
   "merged": [],
   "truncated": {},
+  "custom": [],
 }
 
 # why: readers wait on a running fetch instead of starting their own; that wait is what dedupes gh calls.
@@ -235,10 +237,10 @@ MD_SECTIONS = [
 
 
 def ago(iso, lang="en"):
-  try:
-    m = max(0, (time.time() - datetime.datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()) / 60)
-  except (AttributeError, ValueError):
+  t = ts(iso)
+  if t is None:
     return None
+  m = max(0, (time.time() - t) / 60)
   return f"{m:.0f} min" if m < 60 else f"{m / 60:.0f} h" if m < 2880 else f"{m / 1440:.0f} {STRINGS[lang]['days']}"
 
 
@@ -294,11 +296,10 @@ def inbox_md(d, only=(), lang="en"):
   hidden = [r["repo"] for r in d.get("repos", []) if r["hidden"]]
   if hidden:
     parts.append(s["hidden"].format(", ".join(hidden)))
-  for sid, path in MD_SECTIONS:
-    if only and sid not in only:
-      continue
-    prs = dig(d, *path) or []
-    parts.append(f"## {s['sections'][sid]} ({len(prs)})\n\n" + ("\n".join(p["md"] for p in prs) or s["none"]))
+  sections = [(sid, s["sections"][sid], dig(d, *path) or [], None) for sid, path in MD_SECTIONS]
+  for sid, title, prs, err in sections + [(c["id"], c["title"], c["prs"], c["error"]) for c in d.get("custom") or []]:
+    if not only or sid in only:
+      parts.append(f"## {title} ({len(prs)})\n\n" + ("\n".join(p["md"] for p in prs) or (f"(error: {err})" if err else s["none"])))
   return "\n\n".join(parts) + "\n"
 
 
@@ -339,7 +340,7 @@ def link_stacks(d):
   return d
 
 
-def build(review_raw, mine_raw, merged_raw, rereview_raw=None):
+def build(review_raw, mine_raw, merged_raw, rereview_raw=None, custom=()):
   raws = {"review": review_raw, "mine": mine_raw, "merged": merged_raw, "rereview": rereview_raw or {}}
   me = dig(review_raw, "viewer", "login")
   prs = lambda raw, team=None: [
@@ -351,7 +352,7 @@ def build(review_raw, mine_raw, merged_raw, rereview_raw=None):
   # why: a PR in both searches keeps its review-requested entry, which carries requestedAt.
   urls = {p["url"] for p in review}
   review += [p for p in prs(raws["rereview"], False) if p["rereview"] and p["url"] not in urls]
-  limits = [r["rateLimit"] for r in raws.values() if r.get("rateLimit")]
+  limits = [r["rateLimit"] for r in [*raws.values(), *(raw for _, raw, _ in custom)] if r.get("rateLimit")]
   low = min(limits, key=lambda r: r["remaining"], default=None)
   return link_stacks({
     "login": me,
@@ -372,6 +373,7 @@ def build(review_raw, mine_raw, merged_raw, rereview_raw=None):
       k: dig(raw, "search", "issueCount") for k, raw in raws.items()
       if (dig(raw, "search", "issueCount") or 0) > len(dig(raw, "search", "nodes") or [])
     },
+    "custom": [{"id": s["id"], "title": s["title"], "prs": desc(prs(raw, True), "updatedAt"), "error": err} for s, raw, err in custom],
   })
 
 
@@ -455,7 +457,18 @@ def demo_raws():
          reviews=((me, "CHANGES_REQUESTED"),), rereview=True, size=(77, 31, 5)),
       pr("acme/api", 460, "Rename billing cycle fields", "diego-m", 40, "chore/billing-names", reviews=((me, "COMMENTED"),)),
     ),
+    [({"id": "team", "title": "Team queue"}, raw(
+      pr("acme/api", 490, "Rate-limit the public search endpoint", "yuki-s", 7, "feat/search-rate-limit",
+         pending=("team:backend",), requested=7, size=(130, 12, 5)),
+      pr("acme/api", 491, "Drop the legacy v1 auth endpoints", "tom-h", 31, "chore/drop-v1-auth", checks="PENDING",
+         pending=("team:backend", "diego-m"), labels=(("breaking", "b60205"),), requested=31, size=(12, 840, 17)),
+    ), None)],
   )
+
+
+def section_query(q):
+  words = q.split()
+  return " ".join(["is:pr"] * ("is:pr" not in words) + words + ["archived:false"] * (not any(w.startswith("archived:") for w in words)))
 
 
 def fetch():
@@ -464,9 +477,18 @@ def fetch():
   base = "is:pr is:open archived:false"
   # why: GitHub reads merged:>=DATE in UTC; a local date would shift the window near midnight.
   since = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+  sections = custom_sections(read_config())
+
+  # why: one broken custom query shows its error in its own section instead of failing the whole inbox.
+  def custom(q):
+    try:
+      return search(q, 50, True), None
+    except Exception as e:
+      return {}, str(e)
+
   # why: one combined query runs the searches serially and hits GitHub's ~10s timeout (502);
   # parallel calls finish in the time of the slowest.
-  with ThreadPoolExecutor(4) as pool:
+  with ThreadPoolExecutor(4 + len(sections)) as pool:
     jobs = [
       # why: when results overflow `first`, keep the freshest; search has no sort by merge date.
       pool.submit(search, f"{base} review-requested:@me sort:updated-desc", 100, True),
@@ -474,7 +496,8 @@ def fetch():
       pool.submit(search, f"is:pr author:@me is:merged merged:>={since} sort:updated-desc", 20),
       pool.submit(search, f"{base} reviewed-by:@me -author:@me sort:updated-desc", 100),
     ]
-    return build(*(j.result() for j in jobs))
+    extra = [(s, pool.submit(custom, section_query(s["query"]))) for s in sections]
+    return build(*(j.result() for j in jobs), [(s, *j.result()) for s, j in extra])
 
 
 def read_config():
@@ -490,6 +513,9 @@ def update_config(change):
   with _config_lock:
     c = read_config()
     change(c)
+    if "snoozed" in c:
+      seen = {p["key"]: p["updatedAt"] for p in all_prs(_cache["data"] or {})}
+      c["snoozed"] = {k: v for k, v in snoozes(c).items() if asleep(v, seen.get(k))}
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=CONFIG.parent, prefix=".config.", suffix=".tmp")
     with os.fdopen(fd, "w") as f:
@@ -497,32 +523,84 @@ def update_config(change):
     os.replace(tmp, CONFIG)
 
 
-def hidden_repos():
-  h = read_config().get("hidden")
+def ts(iso):
+  try:
+    t = datetime.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+  except (AttributeError, ValueError):
+    return None
+  return t.timestamp() if t.tzinfo else None
+
+
+def hidden_repos(c):
+  h = c.get("hidden")
   return {r for r in h if isinstance(r, str)} if isinstance(h, list) else set()
 
 
-def save_hidden(repos):
-  update_config(lambda c: c.update(hidden=sorted(repos)))
+def snoozes(c):
+  s = c.get("snoozed")
+  return {k: v for k, v in s.items() if isinstance(v, dict) and ts(v.get("until"))} if isinstance(s, dict) else {}
+
+
+# why: any activity on the PR (push, review, comment) bumps updatedAt and wakes it early, so a snooze never hides news.
+def asleep(entry, updated):
+  since = entry.get("updatedAt")
+  return ts(entry["until"]) > time.time() and not (updated and isinstance(since, str) and updated > since)
+
+
+def stale_hours(c):
+  h = c.get("staleHours")
+  return h if type(h) is int and 1 <= h <= 720 else 24
+
+
+SECTION_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+
+
+def custom_sections(c):
+  out, ids = [], {sid for sid, _ in MD_SECTIONS}
+  for s in c.get("sections") if isinstance(c.get("sections"), list) else []:
+    sid, title, q = (s.get(k) if isinstance(s, dict) else None for k in ("id", "title", "query"))
+    if (all(isinstance(x, str) for x in (sid, title, q)) and SECTION_ID.fullmatch(sid) and sid not in ids
+        and 0 < len(title) <= 80 and 0 < len(q.strip()) <= 256):
+      ids.add(sid)
+      out.append({"id": sid, "title": title, "query": q})
+  # ponytail: 10 sections caps the parallel searches per refresh; raise it if someone needs more.
+  return out[:10]
 
 
 LISTS = [("review", "humans"), ("review", "bots"), *(("mine", k) for k in EMPTY["mine"]), ("merged",)]
 
 
-# why: hiding happens here, not in the page, so the tab badge, notifications and /inbox.md all agree.
+# why: hiding and snoozing happen here, not in the page, so the tab badge, notifications and /inbox.md all agree.
 # why: md is built here per request because the cache is shared by clients asking in different languages.
-def view(d, hidden, lang="en"):
-  counts = {}
-  for path in LISTS:
-    for p in dig(d, *path) or []:
-      counts[p["repo"]] = counts.get(p["repo"], 0) + 1
-  keep = lambda *path: [{**p, "md": md_line(p, lang)} for p in dig(d, *path) or [] if p["repo"] not in hidden]
-  return {
+def view(d, c, lang="en"):
+  hidden, snoozed, sleeping, counts = hidden_repos(c), snoozes(c), {}, {}
+  for p in all_prs(d):
+    counts[p["repo"]] = counts.get(p["repo"], 0) + 1
+
+  def keep(prs):
+    out = []
+    for p in prs or []:
+      if p["repo"] in hidden:
+        continue
+      p, e = {**p, "md": md_line(p, lang)}, snoozed.get(p["key"])
+      if e and asleep(e, p["updatedAt"]):
+        sleeping.setdefault(p["key"], {**p, "snoozedUntil": e["until"]})
+      else:
+        out.append(p)
+    return out
+
+  v = {
     **d,
-    "review": {"humans": keep("review", "humans"), "bots": keep("review", "bots")},
-    "mine": {k: keep("mine", k) for k in EMPTY["mine"]},
-    "merged": keep("merged"),
+    "review": {k: keep(d["review"][k]) for k in EMPTY["review"]},
+    "mine": {k: keep(d["mine"][k]) for k in EMPTY["mine"]},
+    "merged": keep(d["merged"]),
+    "custom": [{**s, "prs": keep(s["prs"])} for s in d["custom"]],
+  }
+  return {
+    **v,
+    "snoozed": sorted(sleeping.values(), key=lambda p: p["snoozedUntil"]),
     "repos": [{"repo": r, "count": counts.get(r, 0), "hidden": r in hidden} for r in sorted(set(counts) | hidden)],
+    "settings": {"staleHours": stale_hours(c)},
   }
 
 
@@ -535,7 +613,44 @@ def data(force=False, lang="en"):
       except Exception as e:  # why: a network blip keeps showing the last good snapshot, flagged.
         _cache.update(error=str(e), errorKind=error_kind(e))
       _cache["at"] = time.time()
-    return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"], "errorKind": _cache["errorKind"]}, hidden_repos(), lang)
+    c = read_config()
+    if DEMO:
+      c = {"snoozed": {"octo-labs/docs#212": {"until": iso_at(time.time() + 20 * 3600), "updatedAt": "9999"}}, **c}
+    return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"], "errorKind": _cache["errorKind"]}, c, lang)
+
+
+def iso_at(t):
+  return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+KEY = re.compile(r"([\w.-]{1,100})/([\w.-]{1,100})#(\d{1,9})")
+
+
+def post_hidden(body):
+  repos = body["hidden"]
+  if not isinstance(repos, list) or len(repos) > 1000 or not all(isinstance(r, str) and 0 < len(r) < 200 for r in repos):
+    return False
+  update_config(lambda c: c.update(hidden=sorted(set(repos))))
+  return True
+
+
+def post_snooze(body):
+  key, until = body["key"], body.get("until")
+  if not (isinstance(key, str) and KEY.fullmatch(key) and (until is None or isinstance(until, str) and len(until) < 40 and ts(until))):
+    return False
+  updated = next((p["updatedAt"] for p in all_prs(_cache["data"] or {}) if p["key"] == key), None)
+
+  def change(c):
+    s = snoozes(c)
+    s.pop(key, None)
+    if until:
+      s[key] = {"until": iso_at(ts(until)), "updatedAt": updated}
+    c["snoozed"] = s
+  update_config(change)
+  return True
+
+
+POSTS = {"/api/hidden": post_hidden, "/api/snooze": post_snooze}
 
 
 def pick_lang(qs):
@@ -590,17 +705,15 @@ class Handler(BaseHTTPRequestHandler):
       return self._send(403, "text/plain", b"forbidden")
     # why: demanding JSON forces a CORS preflight, so another web page can't rewrite the config.
     url = urlsplit(self.path)
-    if url.path != "/api/hidden" or not self.headers.get("Content-Type", "").startswith("application/json"):
+    handler = POSTS.get(url.path)
+    if not handler or not self.headers.get("Content-Type", "").startswith("application/json"):
       return self._send(404, "text/plain", b"not found")
-    if body is None:
-      return self._send(400, "text/plain", b"bad request")
     try:
-      repos = json.loads(body)["hidden"]
-    except (ValueError, KeyError, TypeError):
-      repos = None
-    if not isinstance(repos, list) or len(repos) > 1000 or not all(isinstance(r, str) and 0 < len(r) < 200 for r in repos):
+      ok = body is not None and handler(json.loads(body))
+    except (ValueError, KeyError, TypeError, AttributeError):
+      ok = False
+    if not ok:
       return self._send(400, "text/plain", b"bad request")
-    save_hidden(set(repos))
     self._send(200, "application/json", json.dumps(data(lang=pick_lang(parse_qs(url.query)))).encode())
 
   def _send(self, code, ctype, body):
@@ -707,20 +820,51 @@ def selftest():
   assert {k: [p["number"] for p in v] for k, v in out["mine"].items()} == {"returned": [8], "approved": [5], "waiting": [4], "draft": [3]}
   assert [p["number"] for p in out["merged"]] == [7, 6]
   assert set(out) | {"error"} == set(EMPTY) | {"error"}
-  v = view(out, {"o/r", "gone/repo"})
+  v = view(out, {"hidden": ["o/r", "gone/repo"]})
   assert v["review"]["humans"] == [] and v["mine"]["approved"] == [] and v["merged"] == []
   assert v["repos"] == [{"repo": "gone/repo", "count": 0, "hidden": True}, {"repo": "o/r", "count": 9, "hidden": True}]
-  ves = view(out, set(), "es")
+  ves = view(out, {}, "es")
   assert [{k: x for k, x in p.items() if k != "md"} for p in ves["review"]["humans"]] == out["review"]["humans"]
   assert ves["review"]["humans"][0]["md"] == md_line(out["review"]["humans"][0], "es")
-  assert inbox_md(view(out, {"o/r", "gone/repo"}, "es"), (), "es").startswith("# PRs de @me\n\nRepos ocultos: gone/repo, o/r.\n\n## Necesitan tu review (0)")
+  assert inbox_md(view(out, {"hidden": ["o/r", "gone/repo"]}, "es"), (), "es").startswith("# PRs de @me\n\nRepos ocultos: gone/repo, o/r.\n\n## Necesitan tu review (0)")
   md = inbox_md(ves, (), "es")
   assert md.startswith("# PRs de @me\n\n## Necesitan tu review (2)\n\n- t (o/r#2)") and "## Necesitan tu atención (1)\n\n- t (o/r#8)" in md
   assert inbox_md(ves, {"approved"}, "es") == f"# PRs de @me\n\n## Aprobados (1)\n\n{ves['mine']['approved'][0]['md']}\n"
-  md = inbox_md(view(out, set()))
+  md = inbox_md(view(out, {}))
   assert md.startswith("# PRs for @me\n\n## Needs your review (2)\n\n- t (o/r#2)") and "## Needs your attention (1)\n\n- t (o/r#8)" in md
   assert "## Merged this week (2)" in md and "merged " in md
   assert out["truncated"] == {} and all(p["rereview"] is False for p in out["review"]["humans"])
+
+  # snooze: hides until `until` or until the PR moves; malformed entries are ignored.
+  future, past, upd = iso_at(time.time() + 3600), iso_at(time.time() - 60), "2026-01-02T00:00:00Z"
+  assert asleep({"until": future, "updatedAt": upd}, upd) and asleep({"until": future, "updatedAt": None}, "2030")
+  assert not asleep({"until": future, "updatedAt": upd}, "2026-01-03T00:00:00Z") and not asleep({"until": past}, None)
+  assert ts("2026-10-21T12:00:00") is None and ts("nope") is None and ts("2026-10-21T12:00:00.000Z") == ts("2026-10-21T12:00:00Z")
+  zz = view(out, {"snoozed": {"o/r#2": {"until": future, "updatedAt": upd}, "o/r#5": {"until": future, "updatedAt": "2026-01-01T00:00:00Z"},
+                              "o/r#4": {"until": past, "updatedAt": upd}, "o/r#3": {"until": "soon"}, "o/r#8": 1}, "staleHours": 48})
+  assert [p["number"] for p in zz["review"]["humans"]] == [1] and [p["key"] for p in zz["snoozed"]] == ["o/r#2"]
+  assert zz["snoozed"][0]["snoozedUntil"] == future and zz["snoozed"][0]["md"].startswith("- t (o/r#2)")
+  assert [len(zz["mine"][k]) for k in EMPTY["mine"]] == [1, 1, 1, 1] and "(o/r#2)" not in inbox_md(zz)
+  assert zz["settings"] == {"staleHours": 48} and view(out, {})["settings"] == {"staleHours": 24}
+  assert all(view(out, {"staleHours": h})["settings"]["staleHours"] == 24 for h in (0, 721, True, "48", 2.5))
+
+  # custom sections: validated config, extra searches with their own error, hidden/snooze apply, md after built-ins.
+  sec = {"id": "team", "title": "Team", "query": "is:open team-review-requested:o/t"}
+  assert custom_sections({"sections": [sec, {**sec, "title": "dup"}, {**sec, "id": "Bad id"}, {**sec, "id": "review"},
+                                       {"id": "x", "title": "X"}, {**sec, "id": "y", "query": "  "}, "z", {**sec, "id": "q2"}]}) == [sec, {**sec, "id": "q2"}]
+  assert custom_sections({"sections": {"a": 1}}) == [] and custom_sections({}) == []
+  assert section_query(sec["query"]) == "is:pr is:open team-review-requested:o/t archived:false"
+  assert section_query("is:pr archived:true label:x") == "is:pr archived:true label:x"
+  team = {**human, "number": 20, "url": "u20", "reviewRequests": {"nodes": [{"requestedReviewer": {"__typename": "Team", "slug": "t"}}]}}
+  cust = build(raw(), raw(), raw(), None, [(sec, raw(team, rl={"cost": 1, "remaining": 9, "resetAt": "R9"}), None), ({"id": "bad", "title": "Bad"}, {}, "boom")])
+  assert [(c["id"], [p["number"] for p in c["prs"]], c["error"]) for c in cust["custom"]] == [("team", [20], None), ("bad", [], "boom")]
+  assert cust["custom"][0]["prs"][0]["requestedVia"] == "team:t" and cust["rateLimit"]["remaining"] == 9
+  md = inbox_md(view(cust, {}))
+  assert md.index("## Bots (0)") < md.index("## Team (1)\n\n- t (o/r#20)") and md.endswith("## Bad (0)\n\n(error: boom)\n")
+  assert inbox_md(view(cust, {}, "es"), {"team"}, "es").startswith("# PRs de @me\n\n## Team (1)\n\n- t (o/r#20)")
+  assert view(cust, {"hidden": ["o/r"]})["custom"][0]["prs"] == []
+  zz = view(cust, {"snoozed": {"o/r#20": {"until": future, "updatedAt": upd}}})
+  assert zz["custom"][0]["prs"] == [] and [p["key"] for p in zz["snoozed"]] == ["o/r#20"]
 
   # re-review: kept only when the head moved past my review, deduped, waiting since the head commit.
   old = {"viewerLatestReview": {"commit": {"oid": "a"}}, "headRefOid": "b"}
@@ -796,7 +940,7 @@ def selftest():
   # HTTP: Host/Sec-Fetch-Site checks, body limits, force throttle, config preserving unknown keys.
   import http.client
   g = globals()
-  saved = {k: g[k] for k in ("CONFIG", "fetch")}
+  saved = {k: g[k] for k in ("CONFIG", "fetch", "search")}
   tmp = tempfile.mkdtemp()
   g["CONFIG"] = Path(tmp) / "pudu" / "config.json"
   CONFIG.parent.mkdir()
@@ -845,6 +989,39 @@ def selftest():
     assert os.listdir(CONFIG.parent) == ["config.json"]
     _cache["at"] -= FORCE_MIN_SECONDS
     assert req("GET", "/api/data?force=1")[0] == 200 and calls == [1, 1]
+
+    # snooze: validated, stored with the PR's updatedAt, woken/expired entries pruned on the next write.
+    js = lambda path, payload: req("POST", path, json.dumps(payload), Content_Type="application/json")
+    assert js("/api/hidden", {"hidden": []})[0] == 200
+    for bad in ({"key": "nope", "until": future}, {"key": "o/r#x", "until": future}, {"key": "o/r#5", "until": "tomorrow"},
+                {"key": "o/r#5", "until": "2030-01-01T00:00:00"}, {"until": future}, {"key": "o/" + "r" * 200 + "#5", "until": future}, ["o/r#5"]):
+      assert js("/api/snooze", bad)[0] == 400, bad
+    code, body = js("/api/snooze", {"key": "o/r#5", "until": "2030-01-01T00:00:00.000Z"})
+    d = json.loads(body)
+    assert code == 200 and [p["key"] for p in d["snoozed"]] == ["o/r#5"] and d["mine"]["approved"] == []
+    c = json.loads(CONFIG.read_text())
+    assert c["future"] == {"keep": 1} and c["snoozed"] == {"o/r#5": {"until": "2030-01-01T00:00:00Z", "updatedAt": upd}}
+    c["snoozed"].update({"o/r#4": {"until": past, "updatedAt": upd}, "o/r#3": {"until": future, "updatedAt": "2025-01-01T00:00:00Z"},
+                         "gone/x#1": {"until": future, "updatedAt": upd}})
+    CONFIG.write_text(json.dumps(c))
+    assert js("/api/snooze", {"key": "o/r#2", "until": None})[0] == 200
+    assert sorted(json.loads(CONFIG.read_text())["snoozed"]) == ["gone/x#1", "o/r#5"]
+    code, body = js("/api/snooze", {"key": "o/r#5", "until": None})
+    assert code == 200 and json.loads(body)["snoozed"] == [] and len(json.loads(body)["mine"]["approved"]) == 1
+
+    # fetch runs custom sections in parallel; a failing one keeps its error, the rest of the inbox stands.
+    CONFIG.write_text(json.dumps({"sections": [sec, {"id": "boom", "title": "Boom", "query": "boom"}]}))
+    queries = []
+
+    def fake_search(q, n, requested=False):
+      queries.append(q)
+      if q.startswith("is:pr boom"):
+        raise RuntimeError("bad query")
+      return raw(team) if "team-review" in q else raw()
+    g["search"] = fake_search
+    f = saved["fetch"]()
+    assert [(c["id"], len(c["prs"]), c["error"]) for c in f["custom"]] == [("team", 1, None), ("boom", 0, "bad query")]
+    assert len(queries) == 6 and "is:pr is:open team-review-requested:o/t archived:false" in queries
   finally:
     srv.shutdown()
     srv.server_close()
