@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -148,7 +149,7 @@ def slim(node, me=None):
   rollup = dig(commit, "commit", "statusCheckRollup")
   default = dig(repo, "defaultBranchRef", "name")
   threads = nodes(node, "reviewThreads")
-  p = {
+  return {
     "key": f"{repo.get('nameWithOwner')}#{node.get('number')}",
     "repo": repo.get("nameWithOwner"),
     "owner": dig(repo, "owner", "login"),
@@ -202,7 +203,6 @@ def slim(node, me=None):
     "autoMerge": bool(node.get("autoMergeRequest")),
     "stackParent": None,
   }
-  return p
 
 
 STRINGS = {
@@ -296,9 +296,7 @@ def md_line(p, lang="en"):
     bits.append(f"+{p['additions']} -{p['deletions']}" + (s["files"].format(n) + "s" * (n != 1) if n is not None else ""))
   if p["labels"]:
     bits.append(s["labels"].format(", ".join(l["name"] for l in p["labels"])))
-  when = next((s[key].format(ago(iso, lang)) for key, iso in (
-    ("requested", p["requestedAt"]), ("merged", p["mergedAt"]), ("updated", p["updatedAt"]),
-  ) if ago(iso)), None)
+  when = next((s[k].format(ago(p[k + "At"], lang)) for k in ("requested", "merged", "updated") if ts(p[k + "At"])), None)
   if when:
     bits.append(when)
   return f"- {p['title'] or s['untitled']} ({p['repo']}#{p['number']}) {p['url']}\n  " + " · ".join(bits)
@@ -333,6 +331,7 @@ def search(q, n, requested=False):
   return graphql(QUERY, q=q, n=n, requested=requested)
 
 
+DEFAULT_HOST = os.environ.get("GH_HOST") or "github.com"
 DEMO_ACCOUNTS = [{"host": "github.com", "user": "crow-demo", "active": True}, {"host": "ghe.acme.dev", "user": "demo-work", "active": True}]
 HOST = re.compile(r"[A-Za-z0-9.-]{1,253}(:\d{1,5})?")
 USER = re.compile(r"[\w-]{1,100}")
@@ -376,16 +375,16 @@ def requested_via(p, me, team=True):
 
 
 def all_prs(d):
-  for path in LISTS:
+  for _, path in MD_SECTIONS:
     yield from dig(d, *path) or []
   for c in d.get("custom") or []:
     yield from c["prs"]
 
 
-def link_stacks(d):
+def link_stacks(d, targets=None):
   # why: a fork's head branch (often its own main) lives in another repo, so nothing here stacks on it.
   heads = {(p["repo"], p["headRef"]): p["number"] for p in all_prs(d) if not p["fork"]}
-  for p in all_prs(d):
+  for p in targets or all_prs(d):
     parent = heads.get((p["repo"], p["baseRef"]))
     p["stackParent"] = parent if parent != p["number"] else None
   return d
@@ -430,8 +429,7 @@ def build(review_raw, mine_raw, merged_raw, rereview_raw=None, custom=()):
 
 def demo_raws():
   # why: anchored to process start so a refetch doesn't bump every updatedAt and wake demo snoozes.
-  now = datetime.datetime.fromtimestamp(STARTED, datetime.timezone.utc)
-  iso = lambda h: (now - datetime.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")
+  iso = lambda h: iso_at(STARTED - h * 3600)
   me = "crow-demo"
   user = lambda login, kind="User": {"__typename": kind, "login": login, "avatarUrl": None}
 
@@ -552,7 +550,7 @@ def fetch():
     extra = [(s, pool.submit(custom, section_query(s["query"]))) for s in sections]
     accounts = pool.submit(gh_accounts)
     d = build(*(j.result() for j in jobs), [(s, *j.result()) for s, j in extra])
-  host = (config_account(c) or {}).get("host") or os.environ.get("GH_HOST") or "github.com"
+  host = (config_account(c) or {}).get("host") or DEFAULT_HOST
   return {**d, "accounts": accounts.result() or [{"host": host, "user": d["login"], "active": True}]}
 
 
@@ -623,15 +621,11 @@ def custom_sections(c):
   return out[:10]
 
 
-LISTS = [("review", "humans"), ("review", "bots"), *(("mine", k) for k in EMPTY["mine"]), ("merged",)]
-
-
 # why: hiding and snoozing happen here, not in the page, so the tab badge, notifications and /inbox.md all agree.
 # why: md is built here per request because the cache is shared by clients asking in different languages.
 def view(d, c, lang="en"):
-  hidden, snoozed, sleeping, counts, accounts = hidden_repos(c), snoozes(c), {}, {}, d.get("accounts") or []
-  for p in all_prs(d):
-    counts[p["repo"]] = counts.get(p["repo"], 0) + 1
+  hidden, snoozed, sleeping, accounts = hidden_repos(c), snoozes(c), {}, d.get("accounts") or []
+  counts = Counter(p["repo"] for p in all_prs(d))
 
   def keep(prs):
     out = []
@@ -645,17 +639,15 @@ def view(d, c, lang="en"):
         out.append(p)
     return out
 
-  v = {
+  return {
     **d,
     "review": {k: keep(d["review"][k]) for k in EMPTY["review"]},
     "mine": {k: keep(d["mine"][k]) for k in EMPTY["mine"]},
     "merged": keep(d["merged"]),
     "custom": [{**s, "prs": keep(s["prs"])} for s in d["custom"]],
-  }
-  return {
-    **v,
+    # why: after the lists on purpose; keep() above is what fills `sleeping`.
     "snoozed": sorted(sleeping.values(), key=lambda p: p["snoozedUntil"]),
-    "repos": [{"repo": r, "count": counts.get(r, 0), "hidden": r in hidden} for r in sorted(set(counts) | hidden)],
+    "repos": [{"repo": r, "count": counts[r], "hidden": r in hidden} for r in sorted(set(counts) | hidden)],
     "settings": {"staleHours": stale_hours(c)},
     "accounts": accounts,
     "account": current_account(c, accounts),
@@ -664,7 +656,7 @@ def view(d, c, lang="en"):
 
 def current_account(c, accounts):
   active = [a for a in accounts if a["active"]]
-  a = next((a for a in active if a["host"] == (os.environ.get("GH_HOST") or "github.com")), active[0] if active else None)
+  a = next((a for a in active if a["host"] == DEFAULT_HOST), active[0] if active else None)
   return config_account(c) or a and {"host": a["host"], "user": a["user"]}
 
 
@@ -713,11 +705,9 @@ def post_snooze(body):
     return False
 
   def change(c):
-    s = snoozes(c)
-    s.pop(key, None)
+    c["snoozed"] = {k: v for k, v in snoozes(c).items() if k != key}
     if until:
-      s[key] = {"until": iso_at(ts(until)), "updatedAt": updated}
-    c["snoozed"] = s
+      c["snoozed"][key] = {"until": iso_at(ts(until)), "updatedAt": updated}
   update_config(change)
   return True
 
@@ -781,8 +771,7 @@ def pr_md(ref, lang="en"):
     if p:
       # why: outside a search we can't tell whether a team request includes you, so only a direct one is claimed.
       p["requestedVia"] = requested_via(p, me, False)
-      p["stackParent"] = next((x["number"] for x in all_prs(_cache["data"] or {})
-                               if x["repo"] == p["repo"] and x["headRef"] == p["baseRef"] and x["number"] != p["number"] and not x["fork"]), None)
+      link_stacks(_cache["data"] or {}, [p])
     rollup = dig((nodes(node, "detailChecks") or [{}])[0], "commit", "statusCheckRollup")
     checks = list(dict.fromkeys(
       (c.get("name") or c.get("context"), c.get("detailsUrl") or c.get("targetUrl")) for c in nodes(rollup, "contexts")
@@ -1359,7 +1348,7 @@ def selftest():
     assert [(c["id"], len(c["prs"]), c["error"]) for c in f["custom"]] == [("team", 1, None), ("boom", 0, "bad query")]
     assert len(queries) == 6 and "is:pr is:open team-review-requested:o/t archived:false" in queries
     # why: gh without `auth status --json` still gets the account it's logged in as.
-    assert f["accounts"] == [{"host": os.environ.get("GH_HOST") or "github.com", "user": "me", "active": True}]
+    assert f["accounts"] == [{"host": DEFAULT_HOST, "user": "me", "active": True}]
 
     # account: only one gh knows; saved without losing other keys; the reply is a fresh fetch past the throttle.
     CONFIG.write_text(json.dumps({"future": 1}))
