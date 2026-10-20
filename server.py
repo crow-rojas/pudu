@@ -190,7 +190,9 @@ def slim(node, me=None):
     "requestedAt": requested_at(node, me) if "timelineItems" in node else None,
     "headCommittedAt": dig(commit, "commit", "committedDate"),
     # why: a reviewed commit that is no longer the head means new commits landed after your review.
-    "rereview": bool(node.get("viewerLatestReview")) and dig(node, "viewerLatestReview", "commit", "oid") != node.get("headRefOid"),
+    # why: a reply on your own PR counts as your review too, but your own pushes are never a re-review.
+    "rereview": bool(node.get("viewerLatestReview")) and author.get("login") != me
+                and dig(node, "viewerLatestReview", "commit", "oid") != node.get("headRefOid"),
     "requestedVia": None,
     "mergeQueue": node.get("mergeQueueEntry") and {k: node["mergeQueueEntry"].get(k) for k in ("position", "state")},
     "autoMerge": bool(node.get("autoMergeRequest")),
@@ -1125,6 +1127,7 @@ def selftest():
   assert [(p["number"], p["rereview"]) for p in rr["review"]["humans"]] == [(10, True), (1, True), (13, True), (11, True)]
   assert rr["review"]["humans"][1]["requestedAt"] == "T5" and rr["rateLimit"]["remaining"] == 50
   assert not slim({**human, "viewerLatestReview": None, "headRefOid": "b"})["rereview"]
+  assert slim({**human, **old}, "me")["rereview"] and not slim({**human, **old, "author": {"login": "me"}}, "me")["rereview"]
 
   # truncated: only searches whose issueCount exceeds the nodes returned.
   big = lambda count, *ns: {**raw(*ns), "search": {"issueCount": count, "nodes": list(ns)}}
