@@ -124,12 +124,17 @@ kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px sol
 .sec-h::-webkit-details-marker{display:none}
 .sec-h h2{margin:0;font-size:14px;font-weight:600}
 .sec-h .n{color:var(--faint);font-variant-numeric:tabular-nums}
-.sec-h .hint{color:var(--faint);font-size:12px;margin-left:4px}
+.sec-h .hint{color:var(--muted);font-size:12px;margin-left:4px;text-decoration-color:var(--faint);text-underline-offset:3px}
 .sec-h .btn{margin-left:auto}
+@media (hover:hover){
+  .sec-h .btn{opacity:0;transition:opacity .12s}
+  .sec-h:is(:hover,:focus-within) .btn{opacity:1}
+}
+.empties{margin:4px 2px 10px;color:var(--muted);font-size:13px}
+.empties span[id]{scroll-margin-top:60px}
 .chev{color:var(--faint);transition:transform .15s;width:14px;height:14px}
 details.sec[open] .chev{transform:rotate(90deg)}
 div.sec .sec-h{cursor:default}
-div.sec .chev{visibility:hidden}
 
 /* table */
 .row{display:grid;grid-template-columns:var(--cols);gap:8px;align-items:center;padding:0 14px 0 10px}
@@ -186,7 +191,6 @@ div.sec .chev{visibility:hidden}
 .c-pill [data-tip]::after{right:auto;left:0}
 .when{text-align:right;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .when.w1{color:var(--warn)}.when.w2{color:var(--bad);font-weight:600}
-.empty{padding:12px 16px;border-top:1px solid var(--line);color:var(--muted)}
 .sk{height:48px;border-top:1px solid var(--line-2);background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:shimmer 1.4s infinite}
 @keyframes shimmer{to{background-position:-200% 0}}
 
@@ -229,7 +233,6 @@ dialog form{margin-top:16px;text-align:right}
   :root{--cols:8px 22px minmax(0,1fr) 140px 66px}
   .c-size{display:none!important}
   .search kbd,#copy-all span,#repos-btn span{display:none}
-  .sec-h .hint{display:none}
 }
 @media (max-width:640px){
   .cols,.c-av{display:none!important}
@@ -338,7 +341,7 @@ const T = {
     title: 'Title', reviewers: 'Reviewers', changes: 'Changes', status: 'Status', h_ci: 'CI', h_review: 'Review', h_merge: 'Merge',
     noCi: 'No CI checks', mergeUnknown: 'Mergeability unknown', conflict: 'Conflict', ciFailedOn: c => `CI failed: ${c}`, behind: 'Behind base',
     rereview: 'Re-review', rereviewTip: 'New commits since your review', waiting: 'Waiting for review',
-    openThreads: n => `${n} open thread${n === 1 ? '' : 's'}`, noMatch: 'No PR matches the filter.',
+    openThreads: n => `${n} open thread${n === 1 ? '' : 's'}`, nothingIn: 'Nothing in:', noMatchIn: 'No matches in:', truncTip: 'GitHub has more than Pudú fetched; open the full search',
     someRepos: (a, b) => `${a} of ${b} repos`, allRepos: 'All repos', saveReposFail: "Couldn't save the repos:",
     noServer: e => `Can't reach the local server (${e}). Retrying every minute.`,
     apiPoints: (n, at) => `${n} API points left` + (at ? `, resets at ${at}` : ''),
@@ -385,7 +388,7 @@ const T = {
     title: 'Título', reviewers: 'Reviewers', changes: 'Cambios', status: 'Estado', h_ci: 'CI', h_review: 'Review', h_merge: 'Merge',
     noCi: 'Sin checks de CI', mergeUnknown: 'No se sabe si se puede mergear', conflict: 'Conflicto', ciFailedOn: c => `CI falló: ${c}`, behind: 'Atrás de la base',
     rereview: 'Re-review', rereviewTip: 'Commits nuevos desde tu review', waiting: 'Esperando review',
-    openThreads: n => `${n} hilo${n === 1 ? '' : 's'} sin resolver`, noMatch: 'Ningún PR coincide con el filtro.',
+    openThreads: n => `${n} hilo${n === 1 ? '' : 's'} sin resolver`, nothingIn: 'Nada en:', noMatchIn: 'Sin coincidencias en:', truncTip: 'GitHub tiene más de lo que Pudú trajo; abre la búsqueda completa',
     someRepos: (a, b) => `${a} de ${b} repos`, allRepos: 'Todos los repos', saveReposFail: 'No pude guardar los repos:',
     noServer: e => `No hay conexión con el server local (${e}). Sigo intentando cada minuto.`,
     apiPoints: (n, at) => `${n} puntos de API` + (at ? `, se renueva a las ${at}` : ''),
@@ -454,13 +457,13 @@ const ico = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="no
 
 // why: titles must match MD_SECTIONS in server.py so a copied section reads the same as /inbox.md.
 const SECTIONS = [
-  {id: 'review', urgent: true, when: 'wait', get: d => d.review?.humans},
-  {id: 'returned', urgent: true, mine: true, get: d => d.mine?.returned},
-  {id: 'approved', mine: true, get: d => d.mine?.approved},
-  {id: 'waiting', mine: true, get: d => d.mine?.waiting},
-  {id: 'draft', mine: true, get: d => d.mine?.draft},
-  {id: 'merged', when: 'merged', gapBefore: true, mine: true, get: d => d.merged},
-  {id: 'bots', get: d => d.review?.bots},
+  {id: 'review', urgent: true, when: 'wait', search: 'review', get: d => d.review?.humans},
+  {id: 'returned', urgent: true, mine: true, search: 'mine', get: d => d.mine?.returned},
+  {id: 'approved', mine: true, search: 'mine', get: d => d.mine?.approved},
+  {id: 'waiting', mine: true, search: 'mine', get: d => d.mine?.waiting},
+  {id: 'draft', mine: true, search: 'mine', get: d => d.mine?.draft},
+  {id: 'merged', when: 'merged', gapBefore: true, mine: true, search: 'merged', get: d => d.merged},
+  {id: 'bots', search: 'review', get: d => d.review?.bots},
 ].map(s => ({...s, title: t('s_' + s.id)}));
 const NOTIFY_ON = ['review', 'returned', 'approved'];
 
@@ -576,7 +579,7 @@ function states(p, sec) {
   if (!out.length) add('muted', p.draft ? t('draft') : t('waiting'));
   return out;
 }
-const pill = s => s ? `<span class="c-pill z"><span class="pill" style="--c:var(--${s.tone})" data-tip="${esc(s.tip)}" aria-hidden="true"><b>${esc(s.label)}</b></span></span>` : '<span class="c-pill"></span>';
+const pill = s => `<span class="c-pill z"><span class="pill" style="--c:var(--${s.tone})" data-tip="${esc(s.tip)}" aria-hidden="true"><b>${esc(s.label)}</b></span></span>`;
 const cnum = n => (n >= 1e4 ? compact : num).format(n);
 function size(p) {
   const a = Number(p.additions), d = Number(p.deletions) || 0;
@@ -607,16 +610,15 @@ function row(p, sec) {
   return `<article class="pr row${S.sel === id ? ' sel' : ''}" data-id="${esc(id)}" data-key="${esc(k)}" data-ref="${esc(p.headRef || '')}">
     <span class="c-new">${S.seen.has(k) ? '' : `<i class="new" role="img" aria-label="${t('new')}" title="${t('new')}"></i>`}</span>
     ${sec.mine ? '<span class="c-av"></span>' : avatar(p.author, p.authorAvatar, {cls: 'c-av'})}
-    <div class="body">
+    <div class="body"${st.length ? '' : ' style="grid-column:span 2"'}>
       <a class="t" href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">${esc(p.title || t('noTitle'))}${summary}</a>
       <div class="meta"><span class="num">#${esc(p.number)}</span><span class="repo" title="${esc(p.repo)}">${esc(repoName(p))}</span>`
       + `${sec.mine ? '' : `<span class="sep">·</span><span>${esc(p.author)}</span>`}${flags(p, sec)}</div>
     </div>
-    ${pill(st[0])}${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
+    ${st.length ? pill(st[0]) : ''}${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
   </article>`;
 }
-const colsHead = sec => `<div class="row cols" aria-hidden="true"><span class="c-new"></span><span class="c-av"></span><span>${t('title')}</span>
-  <span class="c-pill">${sec.id === 'merged' ? '' : t('status')}</span><span class="c-people r">${t('reviewers')}</span><span class="c-thr">${ico('comment')}</span>
+const colsHead = sec => `<div class="row cols" aria-hidden="true"><span class="c-new"></span><span class="c-av"></span>${sec.id === 'merged' ? `<span style="grid-column:span 2">${t('title')}</span>` : `<span>${t('title')}</span><span class="c-pill">${t('status')}</span>`}<span class="c-people r">${t('reviewers')}</span><span class="c-thr">${ico('comment')}</span>
   <span class="c-ci">${t('h_ci')}</span><span class="c-dec">${t('h_review')}</span><span class="c-mrg">${sec.id === 'merged' ? '' : t('h_merge')}</span>
   <span class="c-size r">${t('changes')}</span><span class="c-time r">${t(sec.when === 'wait' ? 'waitCol' : sec.when === 'merged' ? 'merged' : 'updated')}</span></div>`;
 
@@ -646,19 +648,26 @@ function render() {
   const d = S.data;
   const filtering = !!S.q;
 
-  const html = SECTIONS.map(sec => {
+  const empty = [], hinted = new Set();
+  let html = SECTIONS.map(sec => {
     const all = arr(sec.get(d)).filter(Boolean), prs = all.filter(matches);
     S.visible[sec.id] = {prs, total: all.length};
+    if (!prs.length) { empty.push(`<span id="sec-${sec.id}">${sec.title}</span>`); return ''; }
     const n = filtering && all.length !== prs.length ? t('of', prs.length, all.length) : `${prs.length}`;
-    const copyBtn = prs.length ? `<button class="btn" type="button" data-copy-sec="${sec.id}" title="${t('copySecTip')}">${ico('copy')}${t('copy')}</button>` : '';
-    const head = `${ico('chev', 'chev')}<h2 id="h-${sec.id}">${sec.title}</h2><span class="n">${n}</span>${copyBtn}`;
-    if (!prs.length) {
-      const msg = filtering && all.length ? `<div class="empty">${t('noMatch')}</div>` : '';
-      return `<div class="sec" id="sec-${sec.id}"><div class="sec-h">${head}</div>${msg}</div>`;
+    // why: one search feeds several sections; say it was cut short once, on the first of them.
+    const total = Number(d.truncated?.[sec.search]);
+    let hint = '';
+    if (total && !hinted.has(sec.search)) {
+      hinted.add(sec.search);
+      const shown = SECTIONS.filter(s => s.search === sec.search).reduce((a, s) => a + arr(s.get(d)).length, 0);
+      hint = `<a class="hint z" href="${searchUrl(sec.search)}" target="_blank" rel="noopener" data-tip="${esc(t('truncTip'))}">${esc(t('of', num.format(shown), num.format(total)))}</a>`;
     }
+    const head = `${ico('chev', 'chev')}<h2 id="h-${sec.id}">${sec.title}</h2><span class="n">${n}</span>${hint}`
+      + `<button class="btn" type="button" data-copy-sec="${sec.id}" title="${t('copySecTip')}">${ico('copy')}${t('copy')}</button>`;
     return `<details class="sec" id="sec-${sec.id}" data-sec="${sec.id}" ${S.closed.has(sec.id) ? '' : 'open'}><summary class="sec-h">${head}</summary>`
       + colsHead(sec) + prs.map(p => row(p, sec)).join('') + '</details>';
   }).join('');
+  if (empty.length) html += `<p class="empties">${t(filtering ? 'noMatchIn' : 'nothingIn')} ${empty.join('<span aria-hidden="true"> · </span>')}</p>`;
 
   const hadFocus = document.activeElement?.closest?.('.pr');
   const app = $('#app');
@@ -677,6 +686,13 @@ function render() {
   renderChrome();
   tick();
 }
+
+const SEARCH = {
+  review: () => 'is:pr is:open archived:false review-requested:@me',
+  mine: () => 'is:pr is:open archived:false author:@me',
+  merged: () => `is:pr author:@me is:merged merged:>=${new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)}`,
+};
+const searchUrl = k => `https://github.com/search?type=pullrequests&q=${encodeURIComponent(SEARCH[k]())}`;
 
 function renderRepos() {
   const repos = arr(S.data?.repos), hidden = repos.filter(r => r.hidden).length;
