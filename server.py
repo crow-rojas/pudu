@@ -859,7 +859,7 @@ class Handler(BaseHTTPRequestHandler):
       return self._send(404, "text/plain", b"not found")
     try:
       ok = body is not None and handler(json.loads(body))
-    except (ValueError, KeyError, TypeError, AttributeError):
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
       ok = False
     if not ok:
       return self._send(400, "text/plain", b"bad request")
@@ -966,7 +966,7 @@ def mcp(inp, out):
       continue
     try:
       msg = json.loads(line)
-    except ValueError:
+    except (ValueError, RecursionError):  # why: deeply nested JSON raises RecursionError, which would end the loop.
       reply = rpc_error(None, -32700, "Parse error")
     else:
       reply = mcp_reply(msg)
@@ -1302,6 +1302,7 @@ def selftest():
       # why: no body — the server can't know how much to read, so unread bytes would turn its close into a flaky RST.
       assert req("POST", "/api/hidden", Content_Type="application/json", Content_Length=n)[0] == 400, n
     assert req("POST", "/api/hidden", json.dumps({"hidden": [1]}), Content_Type="application/json")[0] == 400
+    assert req("POST", "/api/hidden", "[" * 100000, Content_Type="application/json")[0] == 400
     assert json.loads(CONFIG.read_text()) == {"hidden": ["x/y"], "future": {"keep": 1}}
     code, body = req("POST", "/api/hidden", post, Content_Type="application/json")
     assert code == 200 and json.loads(body)["mine"]["approved"] == []
@@ -1387,10 +1388,10 @@ def selftest():
       {"jsonrpc": "2.0", "id": 15, "result": {}},
     ]
     sink = io.StringIO()
-    mcp(io.StringIO("\n".join(map(json.dumps, lines)) + "\n\nnot json\n[]\n"), sink)
+    mcp(io.StringIO("\n".join(map(json.dumps, lines)) + "\n\nnot json\n[]\n" + "[" * 100000 + "\n"), sink)
     got = [json.loads(line) for line in sink.getvalue().splitlines()]
     by = {r["id"]: r for r in got}
-    assert len(got) == 16 and set(by) == set(range(1, 15)) | {None}
+    assert len(got) == 17 and set(by) == set(range(1, 15)) | {None}
     assert by[1]["result"]["protocolVersion"] == "2025-06-18" and by[1]["result"]["capabilities"] == {"tools": {}} and "resultType" not in by[1]["result"]
     assert [t["name"] for t in by[2]["result"]["tools"]] == ["list_inbox", "get_pr"] and all(t["annotations"]["readOnlyHint"] for t in by[2]["result"]["tools"])
     assert by[3]["result"]["isError"] is False and by[3]["result"]["content"][0]["text"].startswith("# PRs for @me\n\n## Approved (1)")
@@ -1402,7 +1403,7 @@ def selftest():
     assert by[8]["error"]["code"] == -32022 and by[8]["error"]["data"] == {"supported": MCP_VERSIONS, "requested": "1900-01-01"}
     assert by[9]["error"]["code"] == by[10]["error"]["code"] == by[11]["error"]["code"] == -32602 and by[12]["error"]["code"] == -32601
     assert by[13]["result"] == {} and by[14]["result"]["isError"] is True
-    assert [r["error"]["code"] for r in got if r["id"] is None] == [-32700, -32600]
+    assert [r["error"]["code"] for r in got if r["id"] is None] == [-32700, -32600, -32700]
   finally:
     srv.shutdown()
     srv.server_close()
@@ -1420,7 +1421,7 @@ if __name__ == "__main__":
   elif "--mcp" in sys.argv[1:]:
     # why: stdout carries only JSON-RPC; a stray print anywhere would corrupt the stream, so it goes to stderr.
     proto, sys.stdout = sys.stdout, sys.stderr
-    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     mcp(sys.stdin, proto)
   else:
     print(f"Pudú on http://localhost:{PORT}" + (" (demo data)" if DEMO else ""))
