@@ -25,16 +25,14 @@ MAX_BODY = 1_000_000
 DEMO = "--demo" in sys.argv[1:] or os.environ.get("PUDU_DEMO") == "1"
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"}
 
-QUERY = """
-query($q: String!, $n: Int!, $requested: Boolean!) {
-  viewer { login avatarUrl }
-  rateLimit { cost remaining resetAt }
-  search(query: $q, type: ISSUE, first: $n) { issueCount nodes { ...pr } }
-}
+# why: GHE versions without merge queue reject the whole query; search() retries without this line.
+NEW_FIELDS = "mergeQueueEntry { position state } autoMergeRequest { enabledAt }"
+FRAGMENT = """
 fragment pr on PullRequest {
   number title url isDraft createdAt updatedAt mergedAt additions deletions changedFiles
   reviewDecision mergeable mergeStateStatus baseRefName headRefName headRefOid
   viewerLatestReview { commit { oid } }
+  mergeQueueEntry { position state } autoMergeRequest { enabledAt }
   repository { name owner { login } nameWithOwner defaultBranchRef { name } }
   author { __typename login avatarUrl }
   labels(first: 20) { nodes { name color } }
@@ -53,6 +51,13 @@ fragment pr on PullRequest {
   }
 }
 """
+QUERY = """
+query($q: String!, $n: Int!, $requested: Boolean!) {
+  viewer { login avatarUrl }
+  rateLimit { cost remaining resetAt }
+  search(query: $q, type: ISSUE, first: $n) { issueCount nodes { ...pr } }
+}
+""" + FRAGMENT
 
 EMPTY = {
   "login": None, "avatarUrl": None, "fetchedAt": None, "rateLimit": None,
@@ -137,6 +142,7 @@ def slim(node, me=None):
   default = dig(repo, "defaultBranchRef", "name")
   threads = nodes(node, "reviewThreads")
   p = {
+    "key": f"{repo.get('nameWithOwner')}#{node.get('number')}",
     "repo": repo.get("nameWithOwner"),
     "owner": dig(repo, "owner", "login"),
     "name": repo.get("name"),
@@ -181,6 +187,10 @@ def slim(node, me=None):
     "headCommittedAt": dig(commit, "commit", "committedDate"),
     # why: a reviewed commit that is no longer the head means new commits landed after your review.
     "rereview": bool(node.get("viewerLatestReview")) and dig(node, "viewerLatestReview", "commit", "oid") != node.get("headRefOid"),
+    "requestedVia": None,
+    "mergeQueue": node.get("mergeQueueEntry") and {k: node["mergeQueueEntry"].get(k) for k in ("position", "state")},
+    "autoMerge": bool(node.get("autoMergeRequest")),
+    "stackParent": None,
   }
   return p
 
@@ -194,7 +204,8 @@ STRINGS = {
       "review": "Needs your review", "returned": "Needs your attention", "approved": "Approved",
       "waiting": "Waiting for review", "draft": "Drafts", "merged": "Merged this week", "bots": "Bots",
     },
-    "rereview": "re-review: new commits", "pending": "pending: {}", "conflict": "conflict", "behind": "branch out of date",
+    "rereview": "re-review: new commits", "stack": "on top of #{}", "queue": "in merge queue", "auto": "auto-merge on",
+    "via": "requested via {}", "pending": "pending: {}", "conflict": "conflict", "behind": "branch out of date",
     "threads": "unresolved threads: {}", "files": " in {} file", "labels": "labels: {}", "days": "days",
     "requested": "review requested {} ago", "merged": "merged {} ago", "updated": "updated {} ago",
     "untitled": "(untitled)", "title": "# PRs for @{}", "hidden": "Hidden repos: {}.", "none": "(none)",
@@ -208,7 +219,8 @@ STRINGS = {
       "review": "Necesitan tu review", "returned": "Necesitan tu atención", "approved": "Aprobados",
       "waiting": "Esperando review", "draft": "Drafts", "merged": "Mergeados esta semana", "bots": "Bots",
     },
-    "rereview": "re-review: commits nuevos", "pending": "pendiente de: {}", "conflict": "conflicto", "behind": "rama desactualizada",
+    "rereview": "re-review: commits nuevos", "stack": "sobre #{}", "queue": "en merge queue", "auto": "auto-merge activado",
+    "via": "pedida vía {}", "pending": "pendiente de: {}", "conflict": "conflicto", "behind": "rama desactualizada",
     "threads": "hilos sin resolver: {}", "files": " en {} archivo", "labels": "labels: {}", "days": "días",
     "requested": "review pedida hace {}", "merged": "mergeado hace {}", "updated": "actualizado hace {}",
     "untitled": "(sin título)", "title": "# PRs de @{}", "hidden": "Repos ocultos: {}.", "none": "(ninguno)",
@@ -236,10 +248,18 @@ def md_line(p, lang="en"):
   bits = [f"@{p['author']}"]
   if p["headRef"]:
     bits.append(f"{p['headRef']} -> {p['baseRef']}")
+  if p["stackParent"]:
+    bits.append(s["stack"].format(p["stackParent"]))
   if p["draft"]:
     bits.append("draft")
   if p.get("rereview"):
     bits.append(s["rereview"])
+  if (p["requestedVia"] or "").startswith("team:"):
+    bits.append(s["via"].format(p["requestedVia"]))
+  if p["mergeQueue"]:
+    bits.append(s["queue"] + (f" (#{p['mergeQueue']['position']})" if p["mergeQueue"].get("position") else ""))
+  if p["autoMerge"]:
+    bits.append(s["auto"])
   if p["checks"] in s["ci"]:
     failed = p["failedChecks"][:5]
     bits.append(s["ci"][p["checks"]] + (f" ({', '.join(failed)})" if failed else ""))
@@ -282,28 +302,58 @@ def inbox_md(d, only=(), lang="en"):
   return "\n\n".join(parts) + "\n"
 
 
-def search(q, n, requested=False):
-  out = json.loads(gh(
-    "api", "graphql", "-f", f"query={QUERY}", "-f", f"q={q}", "-F", f"n={n}", "-F", f"requested={str(requested).lower()}",
-    partial=True,
-  ))
+def graphql(query, **variables):
+  # why: -F would turn a numeric-looking string (a query, an owner) into a number; only non-strings go typed.
+  args = [a for k, v in variables.items() for a in (("-f", f"{k}={v}") if isinstance(v, str) else ("-F", f"{k}={json.dumps(v)}"))]
+  out = json.loads(gh("api", "graphql", "-f", f"query={query}", *args, partial=True))
   if not out.get("data"):
-    raise RuntimeError("; ".join(str(e.get("message", e)) for e in out.get("errors") or []) or "gh returned no data")
+    msg = "; ".join(str(e.get("message", e)) for e in out.get("errors") or []) or "gh returned no data"
+    if NEW_FIELDS in query and ("mergeQueueEntry" in msg or "autoMergeRequest" in msg):
+      return graphql(query.replace(NEW_FIELDS, ""), **variables)
+    raise RuntimeError(msg)
   return out["data"]
+
+
+def search(q, n, requested=False):
+  return graphql(QUERY, q=q, n=n, requested=requested)
+
+
+# why: a team request reaches you only through membership, which the API doesn't tell us; the search already did.
+def requested_via(p, me, team=True):
+  logins = [r["login"] for r in p["pending"]]
+  return "direct" if me in logins else next((l for l in logins if team and l.startswith("team:")), None)
+
+
+def all_prs(d):
+  for path in LISTS:
+    yield from dig(d, *path) or []
+  for c in d.get("custom") or []:
+    yield from c["prs"]
+
+
+def link_stacks(d):
+  heads = {(p["repo"], p["headRef"]): p["number"] for p in all_prs(d)}
+  for p in all_prs(d):
+    parent = heads.get((p["repo"], p["baseRef"]))
+    p["stackParent"] = parent if parent != p["number"] else None
+  return d
 
 
 def build(review_raw, mine_raw, merged_raw, rereview_raw=None):
   raws = {"review": review_raw, "mine": mine_raw, "merged": merged_raw, "rereview": rereview_raw or {}}
   me = dig(review_raw, "viewer", "login")
-  prs = lambda raw: [slim(n, me) for n in nodes(raw, "search") if n.get("number")]
+  prs = lambda raw, team=None: [
+    p if team is None else {**p, "requestedVia": requested_via(p, me, team)}
+    for p in (slim(n, me) for n in nodes(raw, "search") if n.get("number"))
+  ]
   desc = lambda items, key: sorted(items, key=lambda p: p[key] or "", reverse=True)
-  review, mine = prs(review_raw), desc(prs(mine_raw), "updatedAt")
+  review, mine = prs(review_raw, True), desc(prs(mine_raw), "updatedAt")
   # why: a PR in both searches keeps its review-requested entry, which carries requestedAt.
   urls = {p["url"] for p in review}
-  review += [p for p in prs(raws["rereview"]) if p["rereview"] and p["url"] not in urls]
+  review += [p for p in prs(raws["rereview"], False) if p["rereview"] and p["url"] not in urls]
   limits = [r["rateLimit"] for r in raws.values() if r.get("rateLimit")]
   low = min(limits, key=lambda r: r["remaining"], default=None)
-  return {
+  return link_stacks({
     "login": me,
     "avatarUrl": dig(review_raw, "viewer", "avatarUrl"),
     "fetchedAt": time.time(),
@@ -322,7 +372,7 @@ def build(review_raw, mine_raw, merged_raw, rereview_raw=None):
       k: dig(raw, "search", "issueCount") for k, raw in raws.items()
       if (dig(raw, "search", "issueCount") or 0) > len(dig(raw, "search", "nodes") or [])
     },
-  }
+  })
 
 
 def demo_raws():
@@ -333,7 +383,7 @@ def demo_raws():
 
   def pr(repo, number, title, author, hours, head, base="main", checks="SUCCESS", failed=(), decision="REVIEW_REQUIRED",
          reviews=(), pending=(), labels=(), threads=0, conflict=False, draft=False, merged=None, requested=None,
-         size=(40, 12, 3), rereview=False, bot=False):
+         size=(40, 12, 3), rereview=False, bot=False, queue=None, auto=False):
     owner, name = repo.split("/")
     node = {
       "number": number, "title": title, "url": f"https://github.com/{repo}/pull/{number}", "isDraft": draft,
@@ -342,6 +392,8 @@ def demo_raws():
       "mergeable": "CONFLICTING" if conflict else "MERGEABLE", "mergeStateStatus": "DIRTY" if conflict else "CLEAN",
       "baseRefName": base, "headRefName": head, "headRefOid": "b2",
       "viewerLatestReview": {"commit": {"oid": "a1"}} if rereview else None,
+      "mergeQueueEntry": queue and {"position": queue, "state": "QUEUED"},
+      "autoMergeRequest": {"enabledAt": iso(hours)} if auto else None,
       "repository": {"name": name, "owner": {"login": owner}, "nameWithOwner": repo, "defaultBranchRef": {"name": "main"}},
       "author": user(author, "Bot" if bot else "User"),
       "labels": {"nodes": [{"name": n, "color": c} for n, c in labels]},
@@ -385,9 +437,9 @@ def demo_raws():
       pr("octo-labs/infra", 80, "Split Terraform state per environment", me, 28, "refactor/tf-state-split",
          decision="CHANGES_REQUESTED", reviews=(("tom-h", "CHANGES_REQUESTED"),), threads=3, size=(210, 180, 14)),
       pr("acme/api", 484, "Add audit log table", me, 6, "feat/audit-log", decision="APPROVED",
-         reviews=(("diego-m", "APPROVED"), ("yuki-s", "APPROVED")), labels=(("db", "c2e0c6"),), size=(88, 0, 3)),
+         reviews=(("diego-m", "APPROVED"), ("yuki-s", "APPROVED")), labels=(("db", "c2e0c6"),), size=(88, 0, 3), queue=2),
       pr("acme/api", 486, "Audit log: write events from the billing service", me, 4, "feat/audit-log-billing",
-         base="feat/audit-log", pending=("diego-m",), size=(143, 9, 6)),
+         base="feat/audit-log", pending=("diego-m",), size=(143, 9, 6), auto=True),
       pr("octo-labs/docs", 212, "Document the new deploy flow", me, 12, "docs/deploy-flow", checks="PENDING",
          decision=None, pending=("team:docs",), labels=(("docs", "0075ca"),), size=(64, 5, 2)),
       pr("acme/web", 1293, "Prototype keyboard shortcuts", me, 3, "spike/shortcuts", draft=True, decision=None),
@@ -611,6 +663,17 @@ def selftest():
   assert slim(node, "nobody")["requestedAt"] == "T2"
   assert slim({k: v for k, v in node.items() if k != "timelineItems"}, "me")["requestedAt"] is None
   assert not slim({**node, "baseRefName": "develop"})["stacked"]
+  assert p["key"] == "o/r#1" and p["mergeQueue"] is None and p["autoMerge"] is False and p["stackParent"] is None
+  q = slim({**node, "mergeQueueEntry": {"position": 3, "state": "QUEUED"}, "autoMergeRequest": {"enabledAt": "x"}})
+  assert q["mergeQueue"] == {"position": 3, "state": "QUEUED"} and q["autoMerge"]
+  assert "in merge queue (#3) · auto-merge on" in md_line(q) and "en merge queue (#3) · auto-merge activado" in md_line(q, "es")
+  assert requested_via(p, "me") == "direct" and requested_via(p, "x") == "team:devs" and requested_via(p, "x", False) is None
+  assert "pedida vía team:devs" in md_line({**p, "requestedVia": "team:devs"}, "es") and "via" not in md_line({**p, "requestedVia": "direct"})
+  a, b, c = ({**p, "number": n, "repo": r, "headRef": h, "baseRef": base} for n, r, h, base in (
+    (1, "o/r", "feat/a", "main"), (2, "o/r", "feat/b", "feat/a"), (3, "o/other", "feat/c", "feat/a")))
+  link_stacks({"mine": {"waiting": [a]}, "custom": [{"prs": [b, c]}]})
+  assert (a["stackParent"], b["stackParent"], c["stackParent"]) == (None, 1, None)
+  assert "feat/b -> feat/a · on top of #1 ·" in md_line(b) and "sobre #1" in md_line(b, "es")
   bare = slim({"number": 9, "repository": None, "author": None, "commits": None, "comments": None})
   assert bare["author"] == "ghost" and bare["checks"] is None and bare["failedChecks"] == [] and not bare["stacked"]
 
@@ -708,6 +771,14 @@ def selftest():
         assert False, "search should raise"
       except RuntimeError as e:
         assert needle in str(e)
+    # why: GHE without merge queue rejects the field; the retry drops it instead of failing the inbox.
+    argv = []
+    subprocess.run = lambda a, **k: (argv.append(a), subprocess.CompletedProcess(a, *(
+      (1, json.dumps({"errors": [{"message": "Field 'mergeQueueEntry' doesn't exist on type 'PullRequest'"}]}), "")
+      if any(NEW_FIELDS in x for x in a) else (0, json.dumps({"data": {"ok": 1}}), "")
+    )))[1]
+    assert search("123", 5) == {"ok": 1} and len(argv) == 2
+    assert argv[1][-6:] == ["-f", "q=123", "-F", "n=5", "-F", "requested=false"]
   finally:
     subprocess.run = real_run
 
@@ -717,6 +788,10 @@ def selftest():
   assert sum(counts.values()) == 15 and all(counts.values()) and demo["truncated"] == {}
   assert [p["number"] for p in demo["review"]["humans"] if p["rereview"]] == [1271]
   assert {p["repo"] for p in demo["mine"]["returned"] + demo["review"]["humans"]} >= {"acme/api", "acme/web", "octo-labs/infra"}
+  by = {p["key"]: p for p in all_prs(demo)}
+  assert by["acme/api#486"]["stackParent"] == 484 and by["acme/api#486"]["autoMerge"] and by["acme/api#484"]["mergeQueue"]["position"] == 2
+  assert by["octo-labs/infra#77"]["requestedVia"] == "team:platform" and by["acme/web#1290"]["requestedVia"] == "direct"
+  assert by["acme/api#488"]["requestedVia"] is None
 
   # HTTP: Host/Sec-Fetch-Site checks, body limits, force throttle, config preserving unknown keys.
   import http.client
