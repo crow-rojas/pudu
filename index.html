@@ -360,7 +360,8 @@ const T = {
     rereview: 'Re-review', rereviewTip: 'New commits since your review', waiting: 'Waiting for review',
     openThreads: n => `${n} open thread${n === 1 ? '' : 's'}`, nothingIn: 'Nothing in:', noMatchIn: 'No matches in:', truncTip: 'GitHub has more than Pudú fetched; open the full search',
     someRepos: (a, b) => `${a} of ${b} repos`, allRepos: 'All repos', saveReposFail: "Couldn't save the repos:",
-    noServer: e => `Can't reach the local server (${e}). Retrying every minute.`,
+    noServer: e => `Can't reach the local server (${e}). Retrying every minute.`, badReply: "The local server sent a reply Pudú can't read.",
+    e_reply_h: 'Unexpected reply from the server', e_reply_p: 'Something other than Pudú answered on this port, or the server hit an error. The details show what came back.',
     apiPoints: (n, at) => `${n} API points left` + (at ? `, resets at ${at}` : ''),
     retry: 'Retry', noDataShort: 'No data yet', details: 'Details', thenLogin: 'Then sign in', otherOs: l => `Other systems: ${l}`,
     e_gh_missing_h: 'Pudú needs the GitHub CLI',
@@ -408,7 +409,8 @@ const T = {
     rereview: 'Re-review', rereviewTip: 'Commits nuevos desde tu review', waiting: 'Esperando review',
     openThreads: n => `${n} hilo${n === 1 ? '' : 's'} sin resolver`, nothingIn: 'Nada en:', noMatchIn: 'Sin coincidencias en:', truncTip: 'GitHub tiene más de lo que Pudú trajo; abre la búsqueda completa',
     someRepos: (a, b) => `${a} de ${b} repos`, allRepos: 'Todos los repos', saveReposFail: 'No pude guardar los repos:',
-    noServer: e => `No hay conexión con el server local (${e}). Sigo intentando cada minuto.`,
+    noServer: e => `No hay conexión con el server local (${e}). Sigo intentando cada minuto.`, badReply: 'El server local mandó una respuesta que Pudú no entiende.',
+    e_reply_h: 'Respuesta inesperada del server', e_reply_p: 'Algo distinto de Pudú respondió en este puerto, o el server tuvo un error. El detalle muestra qué llegó.',
     apiPoints: (n, at) => `${n} puntos de API` + (at ? `, se renueva a las ${at}` : ''),
     retry: 'Reintentar', noDataShort: 'Sin datos todavía', details: 'Detalles', thenLogin: 'Después inicia sesión', otherOs: l => `Otros sistemas: ${l}`,
     e_gh_missing_h: 'Pudú necesita la CLI de GitHub',
@@ -475,13 +477,13 @@ const ico = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="no
 
 // why: titles must match MD_SECTIONS in server.py so a copied section reads the same as /inbox.md.
 const SECTIONS = [
-  {id: 'review', urgent: true, when: 'wait', search: 'review', get: d => d.review?.humans},
+  {id: 'review', urgent: true, when: 'wait', quiet: true, search: 'review', get: d => d.review?.humans},
   {id: 'returned', urgent: true, mine: true, search: 'mine', get: d => d.mine?.returned},
   {id: 'approved', mine: true, search: 'mine', get: d => d.mine?.approved},
-  {id: 'waiting', mine: true, search: 'mine', get: d => d.mine?.waiting},
+  {id: 'waiting', mine: true, quiet: true, search: 'mine', get: d => d.mine?.waiting},
   {id: 'draft', mine: true, search: 'mine', get: d => d.mine?.draft},
-  {id: 'merged', when: 'merged', gapBefore: true, mine: true, search: 'merged', get: d => d.merged},
-  {id: 'bots', search: 'review', get: d => d.review?.bots},
+  {id: 'merged', when: 'merged', calm: true, gapBefore: true, mine: true, search: 'merged', get: d => d.merged},
+  {id: 'bots', quiet: true, search: 'review', get: d => d.review?.bots},
 ].map(s => ({...s, title: t('s_' + s.id)}));
 const NOTIFY_ON = ['review', 'returned', 'approved'];
 
@@ -491,7 +493,7 @@ const S = {
   seen: new Set(arr(store.get('seen', []))), seenSeeded: store.has('seen'),
   notify: store.get('notify', false) === true,
   closed: new Set(arr(store.get('closed', ['bots']))),
-  sel: null, retryTimer: null, visible: {}, cached: false, err: null, hiddenWant: null,
+  sel: null, retryTimer: null, visible: {}, cached: false, err: null, hiddenWant: null, netRaw: '', gen: 0,
 };
 
 /* time */
@@ -575,7 +577,7 @@ function decision(p) {
   return status('c-dec', ['minus', '--faint', p.decision === 'REVIEW_REQUIRED' ? t('reviewMissing') : t('noReview')]);
 }
 function mergeable(p, sec) {
-  if (sec.id === 'merged') return '<span class="c-mrg"></span>';
+  if (sec.calm) return '<span class="c-mrg"></span>';
   if (p.conflict || p.mergeState === 'DIRTY') return status('c-mrg', ['alert', '--bad', t('conflictWith', p.baseRef)]);
   if (p.mergeState === 'BEHIND') return status('c-mrg', ['behind', '--warn', t('behindOf', p.baseRef)]);
   if (['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].includes(p.mergeState)) return status('c-mrg', ['merge', '--ok', t('mergeable')]);
@@ -583,7 +585,7 @@ function mergeable(p, sec) {
 }
 // why: worst first; the first entry is the pill, all of them feed the screen-reader summary.
 function states(p, sec) {
-  if (sec.id === 'merged') return [];
+  if (sec.calm) return [];
   const out = [], dec = decisionOf(p), failed = arr(p.failedChecks).filter(Boolean);
   const add = (tone, label, tip = label) => out.push({tone, label, tip});
   if (p.conflict || p.mergeState === 'DIRTY') add('bad', t('conflict'), t('conflictWith', p.baseRef));
@@ -594,7 +596,8 @@ function states(p, sec) {
   if (p.rereview) add('accent', t('rereview'), t('rereviewTip'));
   if (dec === 'APPROVED') add('ok', p.mergeState === 'BLOCKED' ? t('approved') : t('mergeable'));
   if (Number(p.unresolvedThreads) > 0) add('warn', t('openThreads', Number(p.unresolvedThreads)));
-  if (!out.length) add('muted', p.draft ? t('draft') : t('waiting'));
+  // why: a section's default state ("waiting" in a review queue) is noise; pills only when there's news.
+  if (!out.length && !sec.quiet) add('muted', p.draft ? t('draft') : t('waiting'));
   return out;
 }
 const pill = s => `<span class="c-pill z"><span class="pill" style="--c:var(--${s.tone})" data-tip="${esc(s.tip)}" aria-hidden="true"><b>${esc(s.label)}</b></span></span>`;
@@ -636,8 +639,8 @@ function row(p, sec) {
     ${st.length ? pill(st[0]) : ''}${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
   </article>`;
 }
-const colsHead = sec => `<div class="row cols" aria-hidden="true"><span class="c-new"></span><span class="c-av"></span>${sec.id === 'merged' ? `<span style="grid-column:span 2">${t('title')}</span>` : `<span>${t('title')}</span><span class="c-pill">${t('status')}</span>`}<span class="c-people r">${t('reviewers')}</span><span class="c-thr">${ico('comment')}</span>
-  <span class="c-ci">${t('h_ci')}</span><span class="c-dec">${t('h_review')}</span><span class="c-mrg">${sec.id === 'merged' ? '' : t('h_merge')}</span>
+const colsHead = sec => `<div class="row cols" aria-hidden="true"><span class="c-new"></span><span class="c-av"></span>${sec.calm ? `<span style="grid-column:span 2">${t('title')}</span>` : `<span>${t('title')}</span><span class="c-pill">${t('status')}</span>`}<span class="c-people r">${t('reviewers')}</span><span class="c-thr">${ico('comment')}</span>
+  <span class="c-ci">${t('h_ci')}</span><span class="c-dec">${t('h_review')}</span><span class="c-mrg">${sec.calm ? '' : t('h_merge')}</span>
   <span class="c-size r">${t('changes')}</span><span class="c-time r">${t(sec.when === 'wait' ? 'waitCol' : sec.when === 'merged' ? 'merged' : 'updated')}</span></div>`;
 
 /* text for Claude */
@@ -769,14 +772,8 @@ async function flushHidden() {
   hideBusy = true;
   const want = S.hiddenWant;
   try {
-    const r = await fetch(`/api/hidden?lang=${LANG}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({hidden: [...want]})});
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d = await r.json();
-    if (S.hiddenWant === want) {
-      S.hiddenWant = null;
-      if (d?.login) { S.data = d; store.set('snap', d); }
-      render();
-    }
+    const d = await save('/api/hidden', {hidden: [...want]});
+    if (S.hiddenWant === want) { S.hiddenWant = null; if (!apply(d)) render(); }
   } catch (e) {
     toast(`${t('saveReposFail')} <code>${esc(e.message)}</code>`);
     if (S.hiddenWant === want) { S.hiddenWant = null; render(); }
@@ -822,7 +819,7 @@ function renderChrome() {
   for (const id of ['#repos-btn', '#copy-all']) $(id).hidden = !d;
   const b = $('#banner'), e = S.err;
   let msg = '';
-  if (S.netError && d) msg = t('noServer', `<code>${esc(S.netError)}</code>`);
+  if (S.netError && d) msg = S.netRaw ? `${t('badReply')} <details><summary>${t('details')}</summary><code>${esc(S.netRaw)}</code></details>` : t('noServer', `<code>${esc(S.netError)}</code>`);
   else if (e && d) {
     msg = t('b_' + e.kind, resetAt()) + ' ' + t('showingFrom', hhmm(d.fetchedAt * 1000));
     if (e.kind === 'other') msg += ` <details><summary>${t('details')}</summary><code>${esc(e.msg)}</code></details>`;
@@ -841,10 +838,11 @@ const FIX = {
     + `<p>${t('otherOs', '<a href="https://cli.github.com" target="_blank" rel="noopener">cli.github.com</a>')}</p>` + cmd('gh auth login', t('thenLogin')),
   gh_auth: () => cmd('gh auth login'),
   other: () => `<details><summary>${t('details')}</summary><pre>${esc(S.err?.msg)}</pre></details>`,
+  reply: () => `<details><summary>${t('details')}</summary><pre>${esc(S.netRaw)}</pre></details>`,
 };
 // why: the 5 s retry would otherwise rebuild the card and collapse an open <details> under the reader.
 function renderNoData() {
-  const kind = S.netError ? 'server' : S.err ? S.err.kind : 'loading';
+  const kind = S.netError ? (S.netRaw ? 'reply' : 'server') : S.err ? S.err.kind : 'loading';
   const html = `<section class="es" aria-labelledby="es-h"><img src="/favicon.svg" alt="" width="36" height="36">`
     + `<h2 id="es-h">${t('e_' + kind + '_h')}</h2><p>${t('e_' + kind + '_p', resetAt())}</p>${FIX[kind]?.() || ''}`
     + (kind === 'loading' ? '' : `<button class="btn" type="button" data-action="retry">${ico('refresh')}${t('retry')}</button>`) + '</section>';
@@ -916,33 +914,52 @@ function syncSeen(d) {
   }
   store.set('seen', [...S.seen]);
 }
+// why: a proxy or a crashed server answers HTML; a raw JSON.parse error means nothing to the reader.
+async function readJson(r) {
+  const text = await r.text();
+  const fail = msg => Object.assign(new Error(msg), {raw: text.slice(0, 2000) || msg});
+  if (!r.ok) throw fail(`HTTP ${r.status}`);
+  try { return JSON.parse(text); } catch { throw fail(t('badReply')); }
+}
+function apply(d) {
+  S.netError = null; S.netRaw = '';
+  const kind = T.en['b_' + d?.errorKind] ? d.errorKind : 'other';
+  S.err = d?.error ? {kind, msg: d.error, resetAt: d.rateLimit?.resetAt} : null;
+  if (!d?.login) { if (S.data) renderChrome(); else renderNoData(); return false; }
+  syncSeen(d);
+  S.data = d;
+  S.cached = false;
+  store.set('snap', d);
+  render();
+  return true;
+}
+let saveChain = Promise.resolve();
+// why: one POST at a time, in order; each answers with the full data, which outranks any poll already in flight.
+function save(path, body) {
+  const run = async () => {
+    const d = await readJson(await fetch(`${path}?lang=${LANG}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}));
+    S.gen++;
+    return d;
+  };
+  return saveChain = saveChain.then(run, run);
+}
 async function load(force = false) {
   if (S.loading) return;
   S.loading = true;
   document.body.classList.add('loading');
   clearTimeout(S.retryTimer);
+  const gen = S.gen;
   try {
-    const r = await fetch(`/api/data?lang=${LANG}${force ? '&force=1' : ''}`, {cache: 'no-store'});
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d = await r.json();
-    S.netError = null;
-    const kind = T.en['b_' + d?.errorKind] ? d.errorKind : 'other';
-    S.err = d?.error ? {kind, msg: d.error, resetAt: d.rateLimit?.resetAt} : null;
-    if (!d || !d.login) {
-      if (S.data) renderChrome(); else renderNoData();
-      S.retryTimer = setTimeout(load, 5000);
-      return;
-    }
+    const d = await readJson(await fetch(`/api/data?lang=${LANG}${force ? '&force=1' : ''}`, {cache: 'no-store'}));
+    // why: a save answered while this poll was in flight; its older snapshot would undo the save on screen.
+    if (gen !== S.gen) return;
     // why: a snapshot from the last visit is not a previous poll; diffing against it would notify on every F5.
-    if (S.data && !S.cached && S.data.fetchedAt !== d.fetchedAt) notifyNew(S.data, d);
-    syncSeen(d);
-    S.data = d;
-    S.cached = false;
-    store.set('snap', d);
-    render();
+    if (S.data && d?.login && !S.cached && S.data.fetchedAt !== d.fetchedAt) notifyNew(S.data, d);
+    if (!apply(d)) { S.retryTimer = setTimeout(load, 5000); return; }
     if (force) toast(t('upToDate'));
   } catch (e) {
     S.netError = e.message || t('netErr');
+    S.netRaw = e.raw || '';
     if (S.data) renderChrome(); else renderNoData();
   } finally {
     S.loading = false;
