@@ -147,6 +147,8 @@ kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px sol
 .chev{color:var(--faint);transition:transform .15s;width:14px;height:14px}
 details.sec[open] .chev{transform:rotate(90deg)}
 div.sec .sec-h{cursor:default}
+.sec-err{display:flex;align-items:center;gap:6px;margin:0;padding:8px 14px;border-top:1px solid var(--line);color:var(--warn);font-size:12.5px}
+.sec-err span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* table */
 .row{display:grid;grid-template-columns:var(--cols);gap:8px;align-items:center;padding:0 14px 0 10px}
@@ -206,6 +208,11 @@ div.sec .sec-h{cursor:default}
 .c-pill [data-tip]::after{right:auto;left:0}
 .when{text-align:right;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .when.w1{color:var(--warn)}.when.w2{color:var(--bad);font-weight:600}
+.acts{position:absolute;right:10px;top:50%;transform:translateY(-50%);z-index:2;display:flex;gap:2px;padding:2px;border-radius:8px;border:1px solid var(--line);background:var(--surface);box-shadow:0 4px 12px -6px rgba(0,0,0,.3);opacity:0;pointer-events:none}
+.acts .ib{width:26px;height:26px}
+.acts .ib .i{width:15px;height:15px}
+.pr:hover .acts,.acts:focus-within{opacity:1;pointer-events:auto}
+@media (hover:none){.pr.sel .acts{opacity:1;pointer-events:auto}}
 .sk{height:48px;border-top:1px solid var(--line-2);background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:shimmer 1.4s infinite}
 @keyframes shimmer{to{background-position:-200% 0}}
 
@@ -223,6 +230,15 @@ dialog dl{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;margin:0;alig
 dialog dt{display:flex;gap:4px;justify-content:flex-end}
 dialog dd{margin:0;color:var(--muted)}
 dialog form{margin-top:16px;text-align:right}
+#snooze{width:min(320px,calc(100vw - 32px));padding:10px}
+#snooze h2{margin:2px 8px 8px;font-size:14px;font-weight:600}
+.opt{display:flex;align-items:center;gap:10px;width:100%;height:34px;padding:0 8px;border:0;border-radius:7px;background:none;cursor:pointer;text-align:left}
+.opt:is(:hover,:focus-visible){background:var(--hover)}
+.opt span{flex:1}
+.opt b{font-weight:450;font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums}
+dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;border-top:1px solid var(--line)}
+.snz-custom input{flex:1;min-width:0;height:28px;padding:0 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px}
+.snz-custom input:focus{outline:none;border-color:var(--accent)}
 .toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,16px);opacity:0;pointer-events:none;background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:8px;font-size:13px;transition:.2s ease;z-index:60;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 .toast code{font:12px var(--mono)}
@@ -313,6 +329,11 @@ dialog form{margin-top:16px;text-align:right}
   <dl id="keys"></dl>
   <form method="dialog"><button class="btn" autofocus data-i18n="done"></button></form>
 </dialog>
+<dialog id="snooze" aria-labelledby="snooze-title">
+  <h2 id="snooze-title"></h2>
+  <div id="snooze-opts"></div>
+  <form id="snooze-form" class="snz-custom"><label class="sr" for="snooze-at" data-i18n="pickTime"></label><input type="datetime-local" id="snooze-at" required><button class="btn" data-i18n="snooze"></button></form>
+</dialog>
 <div class="pop" id="repos" popover data-i18n-attr="aria-label:reposTip">
   <div class="pop-h">
     <input id="repo-q" type="search" data-i18n-attr="placeholder:filterRepos,aria-label:filterRepos" autocomplete="off" spellcheck="false" hidden>
@@ -338,7 +359,10 @@ const T = {
     forClaude: 'For Claude:', shortcuts: 'Keyboard shortcuts', done: 'Done', hiddenNote: "Hidden repos don't count or notify. Alt-click keeps only that one.", all: 'All', noneBtn: 'None', filterRepos: 'Filter repos',
     ownerAll: o => `All repos in ${o}`,
     s_review: 'Needs your review', s_returned: 'Needs your attention', s_approved: 'Approved', s_waiting: 'Waiting for review',
-    s_draft: 'Drafts', s_merged: 'Merged this week', s_bots: 'Bots',
+    s_draft: 'Drafts', s_merged: 'Merged this week', s_bots: 'Bots', s_snoozed: 'Snoozed',
+    snoozeTip: 'Snooze (s)', unsnooze: 'Unsnooze', snoozeTitle: w => `Snooze ${w} until…`, sz_1h: '1 hour', sz_3h: '3 hours', sz_tomorrow: 'Tomorrow 9:00',
+    sz_monday: 'Next Monday 9:00', pickTime: 'Pick a date and time', snooze: 'Snooze', untilAt: x => `until ${x}`,
+    snoozedTil: (w, x) => `Snoozed ${w} until ${x}`, unsnoozed: w => `${w} is back in the inbox`, snoozeFail: "Couldn't snooze:", k_snooze: 'Snooze the PR, or unsnooze it',
     n_review: 'Review requested', n_returned: 'Your PR needs attention', n_approved: 'Your PR was approved', n_rereview: 'New commits on a PR you reviewed',
     justNow: 'just now', now: 'now', noTitle: '(no title)', none: '(none)', of: (a, b) => `${a} of ${b}`,
     copy: 'Copy', copyAll: 'Copy all', copySecTip: 'Copy this section as text', copied: w => `Copied: ${w}`, copyFail: "Couldn't copy to the clipboard",
@@ -389,7 +413,10 @@ const T = {
     forClaude: 'Para Claude:', shortcuts: 'Atajos de teclado', done: 'Listo', hiddenNote: 'Los repos ocultos no cuentan ni notifican. Alt-clic deja solo ese.', all: 'Todos', noneBtn: 'Ninguno', filterRepos: 'Filtrar repos',
     ownerAll: o => `Todos los repos de ${o}`,
     s_review: 'Necesitan tu review', s_returned: 'Necesitan tu atención', s_approved: 'Aprobados', s_waiting: 'Esperando review',
-    s_draft: 'Drafts', s_merged: 'Mergeados esta semana', s_bots: 'Bots',
+    s_draft: 'Drafts', s_merged: 'Mergeados esta semana', s_bots: 'Bots', s_snoozed: 'Pospuestos',
+    snoozeTip: 'Posponer (s)', unsnooze: 'Reactivar', snoozeTitle: w => `Posponer ${w} hasta…`, sz_1h: '1 hora', sz_3h: '3 horas', sz_tomorrow: 'Mañana 9:00',
+    sz_monday: 'El lunes 9:00', pickTime: 'Elegir fecha y hora', snooze: 'Posponer', untilAt: x => `hasta ${x}`,
+    snoozedTil: (w, x) => `${w} pospuesto hasta ${x}`, unsnoozed: w => `${w} volvió a la bandeja`, snoozeFail: 'No pude posponer:', k_snooze: 'Posponer el PR, o reactivarlo',
     n_review: 'Te pidieron review', n_returned: 'Tu PR necesita atención', n_approved: 'Aprobaron tu PR', n_rereview: 'Commits nuevos en un PR que revisaste',
     justNow: 'recién', now: 'ahora', noTitle: '(sin título)', none: '(ninguno)', of: (a, b) => `${a} de ${b}`,
     copy: 'Copiar', copyAll: 'Copiar todo', copySecTip: 'Copiar la sección como texto', copied: w => `Copiado: ${w}`, copyFail: 'No pude copiar al portapapeles',
@@ -498,6 +525,13 @@ const SECTIONS = [
   {id: 'bots', quiet: true, search: 'review', get: d => d.review?.bots},
 ].map(s => ({...s, title: t('s_' + s.id)}));
 
+const SNOOZED = {id: '_snoozed', title: t('s_snoozed'), calm: true, collapsed: true, gapBefore: true, get: d => d.snoozed};
+// why: custom sections follow the built-ins in config order, like /inbox.md; snoozed PRs fold up at the very end.
+const sectionsOf = d => [...SECTIONS, ...arr(d?.custom).filter(c => c?.id).map((c, i) => ({
+  id: String(c.id), title: String(c.title || c.id), error: c.error, gapBefore: i === 0, get: x => arr(x?.custom).find(y => y?.id === c.id)?.prs,
+})), SNOOZED];
+const isClosed = sec => S.closed.has(sec.id) !== !!sec.collapsed;
+
 const S = {
   data: null, netError: null, loading: false, lastLoad: 0,
   q: '',
@@ -529,6 +563,12 @@ function short(iso) {
 }
 // why: Spanish short months render "3 m.", which reads as minutes; spell out the long units.
 const dur = (n, unit, unitDisplay = 'short') => new Intl.NumberFormat(LANG, {style: 'unit', unit, unitDisplay}).format(Math.floor(n));
+function untilText(ms) {
+  const days = Math.round((new Date(ms).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 864e5), hm = {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'};
+  if (days === 0) return hhmm(ms);
+  if (days === 1) return `${rtf.format(1, 'day')} ${hhmm(ms)}`;
+  return new Date(ms).toLocaleString(LANG, days > 0 && days < 7 ? {weekday: 'short', ...hm} : {day: 'numeric', month: 'short', ...hm});
+}
 const fullDate = iso => { const ms = Date.parse(iso); return ms ? new Date(ms).toLocaleString(LANG, {dateStyle: 'medium', timeStyle: 'short'}) : ''; };
 
 /* cells */
@@ -628,6 +668,7 @@ function when(p, sec) {
 }
 function flags(p, sec, depth) {
   const out = [];
+  if (p.snoozedUntil) out.push(`<span class="tag z" data-tip="${esc(fullDate(p.snoozedUntil))}">${ico('clock')}${esc(t('untilAt', untilText(Date.parse(p.snoozedUntil))))}</span>`);
   if (p.draft && sec.id !== 'draft') out.push(`<span class="tag">${ico('draft')}${t('draft')}</span>`);
   const team = /^team:(.+)/.exec(p.requestedVia || '')?.[1];
   if (team) out.push(`<span class="tag z" data-tip="${esc(t('viaTeamTip', team))}">${esc(t('viaTeam', team))}</span>`);
@@ -659,6 +700,7 @@ function dot(p) {
   if (!S.seen.has(k)) return `<i class="new" role="img" aria-label="${t('new')}" title="${t('new')}"></i>`;
   return opened && Date.parse(p.updatedAt) > opened ? `<i class="new upd" role="img" aria-label="${t('updatedSince')}" title="${t('updatedSince')}"></i>` : '';
 }
+const act = (name, icon, label) => `<button class="ib" type="button" data-act="${name}" aria-label="${esc(label)}" title="${esc(label)}">${ico(icon)}</button>`;
 function row(p, sec, depth = 0) {
   const k = keyOf(p), id = `${sec.id}|${k}`, st = states(p, sec);
   const summary = st.length ? `<span class="sr">. ${esc(st.map(s => s.label).join(', '))}</span>` : '';
@@ -671,6 +713,7 @@ function row(p, sec, depth = 0) {
       + `${sec.mine ? '' : `<span class="sep">·</span><span>${esc(p.author)}</span>`}${flags(p, sec, depth)}</div>
     </div>
     ${st.length ? pill(st[0]) : ''}${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
+    <span class="acts">${p.snoozedUntil ? act('unsnooze', 'x', t('unsnooze')) : act('snooze', 'clock', t('snoozeTip'))}</span>
   </article>`;
 }
 const colsHead = sec => `<div class="row cols" aria-hidden="true"><span class="c-new"></span><span class="c-av"></span>${sec.calm ? `<span style="grid-column:span 2">${t('title')}</span>` : `<span>${t('title')}</span><span class="c-pill">${t('status')}</span>`}<span class="c-people r">${t('reviewers')}</span><span class="c-thr">${ico('comment')}</span>
@@ -688,7 +731,7 @@ const hiddenRepos = () => arr(S.data?.repos).filter(r => r.hidden).map(r => r.re
 // why: same header as /inbox.md, so Claude knows when a repo was left out on purpose.
 function allText() {
   const hidden = hiddenRepos();
-  return [`# ${t('inboxOf', S.data?.login)}${filterNote()}`, ...(hidden.length ? [t('hiddenRepos', hidden.join(', '))] : []), ...SECTIONS.map(sectionText)].join('\n\n') + '\n';
+  return [`# ${t('inboxOf', S.data?.login)}${filterNote()}`, ...(hidden.length ? [t('hiddenRepos', hidden.join(', '))] : []), ...sectionsOf(S.data).filter(s => s !== SNOOZED).map(sectionText)].join('\n\n') + '\n';
 }
 
 /* filters */
@@ -704,10 +747,11 @@ function render() {
   const filtering = !!S.q;
 
   const empty = [], hinted = new Set();
-  let html = SECTIONS.map(sec => {
+  const secs = sectionsOf(d);
+  let html = secs.map(sec => {
     const all = arr(sec.get(d)).filter(Boolean), prs = all.filter(matches);
     S.visible[sec.id] = {prs, total: all.length};
-    if (!prs.length) { empty.push(`<span id="sec-${sec.id}">${sec.title}</span>`); return ''; }
+    if (!prs.length && !sec.error) { if (sec !== SNOOZED) empty.push(`<span id="sec-${sec.id}">${esc(sec.title)}</span>`); return ''; }
     const n = filtering && all.length !== prs.length ? t('of', prs.length, all.length) : `${prs.length}`;
     // why: one search feeds several sections; say it was cut short once, on the first of them.
     const total = Number(d.truncated?.[sec.search]);
@@ -717,10 +761,11 @@ function render() {
       const shown = SECTIONS.filter(s => s.search === sec.search).reduce((a, s) => a + arr(s.get(d)).length, 0);
       hint = `<a class="hint z" href="${searchUrl(sec.search)}" target="_blank" rel="noopener" data-tip="${esc(t('truncTip'))}">${esc(t('of', num.format(shown), num.format(total)))}</a>`;
     }
-    const head = `${ico('chev', 'chev')}<h2 id="h-${sec.id}">${sec.title}</h2><span class="n">${n}</span>${hint}`
+    const head = `${ico('chev', 'chev')}<h2 id="h-${sec.id}">${esc(sec.title)}</h2><span class="n">${n}</span>${hint}`
       + `<button class="btn" type="button" data-copy-sec="${sec.id}" title="${t('copySecTip')}">${ico('copy')}${t('copy')}</button>`;
-    return `<details class="sec" id="sec-${sec.id}" data-sec="${sec.id}" ${S.closed.has(sec.id) ? '' : 'open'}><summary class="sec-h">${head}</summary>`
-      + colsHead(sec) + stackOrder(prs).map(([p, depth]) => row(p, sec, depth)).join('') + '</details>';
+    const err = sec.error ? `<p class="sec-err">${ico('alert')}<span title="${esc(sec.error)}">${esc(sec.error)}</span></p>` : '';
+    return `<details class="sec" id="sec-${sec.id}" data-sec="${sec.id}"${sec.collapsed ? ' data-collapsed' : ''} ${isClosed(sec) ? '' : 'open'}><summary class="sec-h">${head}</summary>`
+      + err + (prs.length ? colsHead(sec) + stackOrder(prs).map(([p, depth]) => row(p, sec, depth)).join('') : '') + '</details>';
   }).join('');
   if (empty.length) html += `<p class="empties">${t(filtering ? 'noMatchIn' : 'nothingIn')} ${empty.join('<span aria-hidden="true"> · </span>')}</p>`;
 
@@ -731,9 +776,10 @@ function render() {
   app.setAttribute('aria-busy', 'false');
   if (hadFocus && S.sel) $(`.pr[data-id="${CSS.escape(S.sel)}"] .t`)?.focus({preventScroll: true});
 
-  $('#nav').innerHTML = SECTIONS.map(sec => {
+  $('#nav').innerHTML = secs.map(sec => {
     const n = S.visible[sec.id].prs.length;
-    return `${sec.gapBefore ? '<li class="gap" aria-hidden="true"></li>' : ''}<li><a href="#sec-${sec.id}" class="${n && sec.urgent ? 'hot' : ''}" data-sec="${sec.id}"><span>${sec.title}</span><b>${n}</b></a></li>`;
+    if (sec === SNOOZED && !n) return '';
+    return `${sec.gapBefore ? '<li class="gap" aria-hidden="true"></li>' : ''}<li><a href="#sec-${sec.id}" class="${n && sec.urgent ? 'hot' : ''}" data-sec="${sec.id}"><span>${esc(sec.title)}</span><b>${n}</b></a></li>`;
   }).join('');
 
   renderRepos();
@@ -952,7 +998,7 @@ function notifyNew(prev, next) {
   }
 }
 function syncSeen(d) {
-  const keys = SECTIONS.flatMap(s => arr(s.get(d))).filter(Boolean).map(keyOf);
+  const keys = sectionsOf(d).flatMap(s => arr(s.get(d))).filter(Boolean).map(keyOf);
   if (!S.seenSeeded) { keys.forEach(k => S.seen.add(k)); S.seenSeeded = true; }
   // why: a snapshot flagged with error may be partial; pruning against it would re-mark PRs as new.
   // why: a hidden repo's PRs are absent, not gone; keep them seen so unhiding doesn't flag them as new.
@@ -1084,6 +1130,55 @@ function copyAll() {
   copy(allText(), t('wholeInbox'));
 }
 
+/* snooze */
+const at9 = days => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(9, 0, 0, 0); return d.getTime(); };
+const SNOOZE_OPTS = {'1h': () => Date.now() + 36e5, '3h': () => Date.now() + 3 * 36e5, tomorrow: () => at9(1), monday: () => at9((8 - new Date().getDay()) % 7 || 7)};
+const localInput = ms => new Date(ms - new Date(ms).getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+let snoozeFor = null;
+function openSnooze(p) {
+  if (!p) return;
+  snoozeFor = p;
+  $('#snooze-title').textContent = t('snoozeTitle', `${repoName(p)} #${p.number}`);
+  const opt = (key, until, label, hint) => `<button type="button" class="opt" data-until="${until}"><kbd>${key}</kbd><span>${esc(label)}</span><b>${esc(hint)}</b></button>`;
+  const day = ms => new Date(ms).toDateString() === new Date().toDateString() ? hhmm(ms) : new Date(ms).toLocaleDateString(LANG, {weekday: 'short', day: 'numeric', month: 'short'});
+  $('#snooze-opts').innerHTML = Object.entries(SNOOZE_OPTS).map(([k, f], i) => { const ms = f(); return opt(i + 1, ms, t('sz_' + k), day(ms)); }).join('')
+    + (p.snoozedUntil ? opt('u', '', t('unsnooze'), t('untilAt', untilText(Date.parse(p.snoozedUntil)))) : '');
+  const at = $('#snooze-at');
+  at.min = localInput(Date.now());
+  at.value = localInput(at9(1));
+  $('#snooze').showModal();
+}
+async function snooze(p, ms) {
+  const rows = visibleRows(), i = rows.findIndex(r => r.dataset.id === S.sel), next = ms && (rows[i + 1] || rows[i - 1])?.dataset.id;
+  const what = `${repoName(p)} #${p.number}`;
+  try {
+    apply(await save('/api/snooze', {key: keyOf(p), until: ms ? new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z') : null}));
+    toast(ms ? t('snoozedTil', esc(what), esc(untilText(ms))) : t('unsnoozed', esc(what)));
+    // why: the snoozed row is gone; keep the keyboard flow on its neighbour.
+    const el = next && $(`.pr[data-id="${CSS.escape(next)}"]`);
+    if (el) select(el);
+  } catch (e) { toast(`${t('snoozeFail')} <code>${esc(e.message)}</code>`); }
+}
+$('#snooze-opts').addEventListener('click', e => {
+  const b = e.target.closest('[data-until]');
+  if (!b) return;
+  $('#snooze').close();
+  snooze(snoozeFor, Number(b.dataset.until) || null);
+});
+$('#snooze-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const ms = new Date($('#snooze-at').value).getTime();
+  if (!(ms > Date.now())) return;
+  $('#snooze').close();
+  snooze(snoozeFor, ms);
+});
+$('#snooze').addEventListener('keydown', e => {
+  if (e.target.matches('input')) return;
+  const b = e.key === 'u' ? $('#snooze-opts [data-until=""]') : /^[1-4]$/.test(e.key) ? $(`#snooze-opts .opt:nth-child(${e.key})`) : null;
+  if (b) { e.preventDefault(); b.click(); }
+});
+$('#snooze').addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+
 /* selection + keys */
 const visibleRows = () => [...document.querySelectorAll('.pr')].filter(r => r.offsetParent !== null);
 function select(rowEl, focus = true) {
@@ -1114,17 +1209,19 @@ document.addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const inField = e.target.matches?.('input, textarea, select');
   if (inField) {
+    if (e.target.type !== 'search') return;
     if (e.key === 'Escape') { if (e.target.value) { e.preventDefault(); e.target.value = ''; e.target.dispatchEvent(new Event('input')); } else e.target.blur(); }
     else if (e.key === 'Enter' && e.target.id === 'q') { e.preventDefault(); e.target.blur(); move(0); }
     return;
   }
-  if ($('#help').open || $('#repos').matches(':popover-open')) return;
+  if ($('#help').open || $('#snooze').open || document.querySelector(':popover-open')) return;
   const k = e.key, r = current(), p = r && prOf(r);
   if (k === 'j' || k === 'ArrowDown') { e.preventDefault(); move(1); }
   else if (k === 'k' || k === 'ArrowUp') { e.preventDefault(); move(-1); }
   else if (k === 'o' || (k === 'Enter' && !e.target.closest?.('a, button, summary'))) { if (r) { e.preventDefault(); r.querySelector('.t')?.click(); } }
   else if (k === '[' || k === ']') jumpSection(k === ']' ? 1 : -1);
   else if (k === 'x') markSeen(r);
+  else if (k === 's') { if (p) { e.preventDefault(); openSnooze(p); } }
   else if (k === 'y') { if (p) copy(p.md, t('asText', `${repoName(p)} #${p.number}`)); }
   else if (k === 'Y') copyAll();
   else if (k === 'c') { if (r) r.dataset.ref ? copy(shq(r.dataset.ref)) : toast(t('noBranch')); }
@@ -1146,26 +1243,35 @@ function setQuery(v) {
 $('#q').addEventListener('input', e => { clearTimeout(qTimer); qTimer = setTimeout(() => setQuery(e.target.value), 80); });
 
 document.addEventListener('click', e => {
-  const t = e.target;
-  const link = t.closest('.pr a.t');
+  const el = e.target;
+  const link = el.closest('.pr a.t');
   if (link) { markSeen(link.closest('.pr')); select(link.closest('.pr'), false); return; }
-  const cs = t.closest('[data-copy-sec]');
+  const a = el.closest('.pr [data-act]');
+  if (a) {
+    const r = a.closest('.pr'), p = prOf(r);
+    select(r, false);
+    if (a.dataset.act === 'snooze') openSnooze(p);
+    else if (a.dataset.act === 'unsnooze') snooze(p, null);
+    return;
+  }
+  const cs = el.closest('[data-copy-sec]');
   if (cs) {
     e.preventDefault();
-    const sec = SECTIONS.find(s => s.id === cs.dataset.copySec);
+    const sec = sectionsOf(S.data).find(s => s.id === cs.dataset.copySec);
     copy(sectionText(sec) + filterNote() + '\n', t('asText', sec.title));
     return;
   }
-  const nav = t.closest('.nav a');
-  if (nav) { const d = $(`#sec-${nav.dataset.sec}`); if (d?.tagName === 'DETAILS' && !d.open) d.open = true; }
-  if (t.closest('[data-action="retry"]')) load(true);
-  const ct = t.closest('[data-copy-text]');
+  const nav = el.closest('.nav a');
+  if (nav) { const d = $(`#sec-${CSS.escape(nav.dataset.sec)}`); if (d?.tagName === 'DETAILS' && !d.open) d.open = true; }
+  if (el.closest('[data-action="retry"]')) load(true);
+  const ct = el.closest('[data-copy-text]');
   if (ct) copy(ct.dataset.copyText);
 });
 document.addEventListener('toggle', e => {
   const id = e.target.dataset?.sec;
   if (!id) return;
-  e.target.open ? S.closed.delete(id) : S.closed.add(id);
+  // why: a folded-by-default section (snoozed) stores being opened, the rest store being closed.
+  !e.target.open !== e.target.hasAttribute('data-collapsed') ? S.closed.add(id) : S.closed.delete(id);
   store.set('closed', [...S.closed]);
 }, true);
 $('#copy-all').addEventListener('click', copyAll);
@@ -1183,7 +1289,7 @@ addEventListener('focus', () => { if (Date.now() - S.lastLoad > FOCUS_MIN_GAP_MS
 
 for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
 for (const el of document.querySelectorAll('[data-i18n-attr]')) for (const pair of el.dataset.i18nAttr.split(',')) { const [a, k] = pair.split(':'); el.setAttribute(a, t(k)); }
-$('#keys').innerHTML = [['j k', 'move'], ['[ ]', 'sections'], ['o Enter', 'open'], ['x', 'seen'], ['y', 'copy'], ['Y', 'copyAll'], ['c', 'branch'], ['g', 'checkout'], ['/', 'filter'],
+$('#keys').innerHTML = [['j k', 'move'], ['[ ]', 'sections'], ['o Enter', 'open'], ['x', 'seen'], ['s', 'snooze'], ['y', 'copy'], ['Y', 'copyAll'], ['c', 'branch'], ['g', 'checkout'], ['/', 'filter'],
   ['p', 'repos'], ['r', 'refresh'], ['t', 'theme'], ['Esc', 'esc'], ['?', 'help']]
   .map(([keys, k]) => `<dt>${keys.split(' ').map(x => `<kbd>${esc(x)}</kbd>`).join('')}</dt><dd>${t('k_' + k)}</dd>`).join('');
 $('#curl').textContent = `curl -s ${location.host}/inbox.md`;
