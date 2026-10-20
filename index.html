@@ -357,7 +357,9 @@ const T = {
     requested: 'Review requested', updated: 'Updated', waitCol: 'Waiting', draft: 'Draft', stackedOn: b => `Stacked on ${b}`, new: 'New',
     title: 'Title', reviewers: 'Reviewers', changes: 'Changes', status: 'Status', h_ci: 'CI', h_review: 'Review', h_merge: 'Merge',
     noCi: 'No CI checks', mergeUnknown: 'Mergeability unknown', conflict: 'Conflict', ciFailedOn: c => `CI failed: ${c}`, behind: 'Behind base',
-    rereview: 'Re-review', rereviewTip: 'New commits since your review', waiting: 'Waiting for review',
+    rereview: 'New commits', rereviewTip: 'New commits since your review', waiting: 'Waiting for review',
+    viaTeam: s => `via team ${s}`, viaTeamTip: s => `You were asked through the ${s} team`, queue: n => n ? `Queue #${n}` : 'In queue', queueTip: s => `Merge queue: ${s}`,
+    autoMerge: 'Auto-merge', autoMergeTip: 'Merges by itself once the requirements pass', onTopOf: n => `on top of #${n}`,
     openThreads: n => `${n} open thread${n === 1 ? '' : 's'}`, nothingIn: 'Nothing in:', noMatchIn: 'No matches in:', truncTip: 'GitHub has more than Pudú fetched; open the full search',
     someRepos: (a, b) => `${a} of ${b} repos`, allRepos: 'All repos', saveReposFail: "Couldn't save the repos:",
     noServer: e => `Can't reach the local server (${e}). Retrying every minute.`, badReply: "The local server sent a reply Pudú can't read.",
@@ -406,7 +408,9 @@ const T = {
     requested: 'Te pidieron review', updated: 'Actualizado', waitCol: 'Espera', draft: 'Draft', stackedOn: b => `Apilado sobre ${b}`, new: 'Nuevo',
     title: 'Título', reviewers: 'Reviewers', changes: 'Cambios', status: 'Estado', h_ci: 'CI', h_review: 'Review', h_merge: 'Merge',
     noCi: 'Sin checks de CI', mergeUnknown: 'No se sabe si se puede mergear', conflict: 'Conflicto', ciFailedOn: c => `CI falló: ${c}`, behind: 'Atrás de la base',
-    rereview: 'Re-review', rereviewTip: 'Commits nuevos desde tu review', waiting: 'Esperando review',
+    rereview: 'Commits nuevos', rereviewTip: 'Commits nuevos desde tu review', waiting: 'Esperando review',
+    viaTeam: s => `vía equipo ${s}`, viaTeamTip: s => `Te lo pidieron a través del equipo ${s}`, queue: n => n ? `Cola #${n}` : 'En cola', queueTip: s => `Merge queue: ${s}`,
+    autoMerge: 'Auto-merge', autoMergeTip: 'Se mergea solo cuando se cumplan los requisitos', onTopOf: n => `sobre #${n}`,
     openThreads: n => `${n} hilo${n === 1 ? '' : 's'} sin resolver`, nothingIn: 'Nada en:', noMatchIn: 'Sin coincidencias en:', truncTip: 'GitHub tiene más de lo que Pudú trajo; abre la búsqueda completa',
     someRepos: (a, b) => `${a} de ${b} repos`, allRepos: 'Todos los repos', saveReposFail: 'No pude guardar los repos:',
     noServer: e => `No hay conexión con el server local (${e}). Sigo intentando cada minuto.`, badReply: 'El server local mandó una respuesta que Pudú no entiende.',
@@ -445,6 +449,8 @@ const num = new Intl.NumberFormat(LANG);
 const compact = new Intl.NumberFormat(LANG, {notation: 'compact'});
 const rtf = new Intl.RelativeTimeFormat(LANG, {numeric: 'auto', style: 'short'});
 const hhmm = ms => new Date(ms).toLocaleTimeString(LANG, {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
+// why: a branch name may legally hold $( ; or backticks; single quotes keep a pasted ref inert.
+const shq = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const P = {
@@ -507,15 +513,14 @@ function ago(iso) {
   return rtf.format(Math.round(s / 86400), 'day');
 }
 function short(iso) {
-  const m = (Date.now() - Date.parse(iso)) / 6e4;
-  if (!(m >= 0)) return ['', 0];
-  const h = m / 60, urgency = h < 24 ? 0 : h < 72 ? 1 : 2;
-  if (m < 1) return [t('now'), 0];
-  if (m < 60) return [dur(m, 'minute'), 0];
-  if (h < 24) return [dur(h, 'hour'), 0];
-  if (h < 24 * 30) return [dur(h / 24, 'day'), urgency];
-  if (h < 24 * 365) return [dur(h / 24 / 30, 'month', 'long'), urgency];
-  return [dur(h / 24 / 365, 'year', 'long'), urgency];
+  const m = (Date.now() - Date.parse(iso)) / 6e4, h = m / 60;
+  if (!(m >= 0)) return '';
+  if (m < 1) return t('now');
+  if (m < 60) return dur(m, 'minute');
+  if (h < 24) return dur(h, 'hour');
+  if (h < 24 * 30) return dur(h / 24, 'day');
+  if (h < 24 * 365) return dur(h / 24 / 30, 'month', 'long');
+  return dur(h / 24 / 365, 'year', 'long');
 }
 // why: Spanish short months render "3 m.", which reads as minutes; spell out the long units.
 const dur = (n, unit, unitDisplay = 'short') => new Intl.NumberFormat(LANG, {style: 'unit', unit, unitDisplay}).format(Math.floor(n));
@@ -616,6 +621,10 @@ function when(p, sec) {
 function flags(p, sec) {
   const out = [];
   if (p.draft && sec.id !== 'draft') out.push(`<span class="tag">${ico('draft')}${t('draft')}</span>`);
+  const team = /^team:(.+)/.exec(p.requestedVia || '')?.[1];
+  if (team) out.push(`<span class="tag z" data-tip="${esc(t('viaTeamTip', team))}">${esc(t('viaTeam', team))}</span>`);
+  if (p.mergeQueue) out.push(`<span class="tag z" data-tip="${esc(t('queueTip', p.mergeQueue.state || ''))}">${ico('merge')}${esc(t('queue', Number(p.mergeQueue.position) || 0))}</span>`);
+  if (p.autoMerge) out.push(`<span class="tag z" data-tip="${esc(t('autoMergeTip'))}">${ico('merge')}${t('autoMerge')}</span>`);
   if (p.stacked && p.baseRef) out.push(`<span class="tag z" data-tip="${esc(t('stackedOn', p.baseRef))}">${ico('stack')}<code>${esc(p.baseRef)}</code></span>`);
   const ls = arr(p.labels).filter(l => l && l.name);
   for (const l of ls.slice(0, 2)) {
@@ -856,10 +865,11 @@ function renderNoData() {
 
 /* live bits */
 function tick() {
+  const stale = (Number(S.data?.settings?.staleHours) || 24) * 36e5;
   for (const el of document.querySelectorAll('[data-t]')) {
-    const [text, urgency] = short(el.dataset.t);
-    el.textContent = text;
-    el.className = `when c-time z${el.dataset.urgent && urgency ? ' w' + urgency : ''}`;
+    const age = Date.now() - Date.parse(el.dataset.t), lvl = !el.dataset.urgent ? 0 : age > 3 * stale ? 2 : age > stale ? 1 : 0;
+    el.textContent = short(el.dataset.t);
+    el.className = `when c-time z${lvl ? ' w' + lvl : ''}`;
   }
   if (S.data?.fetchedAt) {
     const iso = new Date(S.data.fetchedAt * 1000).toISOString();
@@ -1071,7 +1081,7 @@ document.addEventListener('keydown', e => {
   else if (k === 'x') markSeen(r);
   else if (k === 'y') { if (p) copy(p.md, t('asText', `${repoName(p)} #${p.number}`)); }
   else if (k === 'Y') copyAll();
-  else if (k === 'c') { if (r) r.dataset.ref ? copy(r.dataset.ref) : toast(t('noBranch')); }
+  else if (k === 'c') { if (r) r.dataset.ref ? copy(shq(r.dataset.ref)) : toast(t('noBranch')); }
   else if (k === 'g') { if (p) copy(`gh pr checkout ${p.number} -R ${p.repo}`); }
   else if (k === '/') { e.preventDefault(); $('#q').focus(); $('#q').select(); }
   else if (k === 'r') load(true);
