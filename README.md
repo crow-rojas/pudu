@@ -9,7 +9,7 @@ A local GitHub pull request inbox: what's waiting for your review and where your
 
 Pudú is a Python standard-library server plus a single HTML page. It reads everything through the [`gh`](https://cli.github.com/) CLI with the session you already have, and serves the same inbox as LLM-friendly markdown and over MCP, so your coding agent can read it too. The layout takes its cue from Graphite's inbox.
 
-> ¿Hablas español? La interfaz sigue el idioma de tu navegador, y el texto para agentes acepta `?lang=es`.
+> ¿Hablas español? La interfaz sigue el idioma de tu navegador (o el botón EN/ES, tecla `l`), y el texto para agentes acepta `?lang=es`.
 
 ## Why Pudú
 
@@ -94,6 +94,7 @@ Press `?` in the page for this list.
 | `p` | Choose which repos to show |
 | `r` | Refresh now, skipping the cache |
 | `t` | Toggle light and dark |
+| `l` | Switch language (English / Español) |
 | `Esc` | Clear the filter, close, or deselect |
 | `?` | Show the shortcuts |
 

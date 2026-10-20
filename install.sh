@@ -57,7 +57,7 @@ $(for kv in "${PASS[@]}"; do printf '    <key>%s</key><string>%s</string>\n' "${
 XML
 }
 
-# why: a launcher, not a wrapper — the server lives in launchd, so the app only opens a tab and exits.
+# why: a launcher, not a wrapper. The server lives in launchd, so the app only opens a tab and exits.
 mac_app() {
   rm -rf "$APP"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
