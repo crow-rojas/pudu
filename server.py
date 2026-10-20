@@ -708,6 +708,9 @@ def post_snooze(body):
   if not (isinstance(key, str) and KEY.fullmatch(key) and (until is None or isinstance(until, str) and len(until) < 40 and ts(until))):
     return False
   updated = next((p["updatedAt"] for p in all_prs(_cache["data"] or {}) if p["key"] == key), None)
+  # why: without the PR's updatedAt the snooze could only wake on time, never on activity; the UI only snoozes visible PRs.
+  if until and not updated:
+    return False
 
   def change(c):
     s = snoozes(c)
@@ -1327,7 +1330,7 @@ def selftest():
     js = lambda path, payload: req("POST", path, json.dumps(payload), Content_Type="application/json")
     assert js("/api/hidden", {"hidden": []})[0] == 200
     for bad in ({"key": "nope", "until": future}, {"key": "o/r#x", "until": future}, {"key": "o/r#5", "until": "tomorrow"},
-                {"key": "o/r#5", "until": "2030-01-01T00:00:00"}, {"until": future}, {"key": "o/" + "r" * 200 + "#5", "until": future}, ["o/r#5"]):
+                {"key": "o/r#5", "until": "2030-01-01T00:00:00"}, {"until": future}, {"key": "o/" + "r" * 200 + "#5", "until": future}, ["o/r#5"], {"key": "o/r#99", "until": future}):
       assert js("/api/snooze", bad)[0] == 400, bad
     code, body = js("/api/snooze", {"key": "o/r#5", "until": "2030-01-01T00:00:00.000Z"})
     d = json.loads(body)
