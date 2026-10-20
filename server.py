@@ -94,8 +94,8 @@ def error_kind(e):
 
 def gh(*args, partial=False, env=None):
   out = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=60, env=env)
-  # why: `gh api graphql` exits 1 on partial GraphQL errors while still printing usable data.
-  if out.returncode and not (partial and out.stdout.strip()):
+  # why: `gh api graphql` exits 1 on partial GraphQL errors while still printing usable JSON; a 502 prints an HTML page.
+  if out.returncode and not (partial and out.stdout.lstrip().startswith("{")):
     raise RuntimeError(out.stderr.strip() or "gh failed")
   return out.stdout
 
@@ -1152,6 +1152,7 @@ def selftest():
     for stdout, stderr, needle in (
       (json.dumps({"data": None, "errors": [{"message": "Something went wrong"}]}), "", "Something went wrong"),
       ("", "To get started with GitHub CLI, please run:  gh auth login", "gh auth login"),
+      ("<html><title>502 Bad Gateway</title></html>\n", "gh: HTTP 502\n", "HTTP 502"),
     ):
       fake(1, stdout, stderr)
       try:
