@@ -281,6 +281,8 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
   .cols,.c-av{display:none!important}
   .pr{grid-template-columns:8px minmax(0,1fr) auto auto;grid-template-areas:"new t t time" "new meta pill pill";row-gap:3px;padding-block:8px}
   .pr .meta .lbl{display:none}
+  .pr.kid :is(.t,.meta){margin-left:calc(var(--d) * 14px)}
+  .pr.kid .body::before{display:none}
   .pr .body{display:contents}
   .pr .c-new{grid-area:new;align-self:start;margin-top:7px}
   .pr .t{grid-area:t}
@@ -375,7 +377,7 @@ const T = {
     s_draft: 'Drafts', s_merged: 'Merged this week', s_bots: 'Bots', s_snoozed: 'Snoozed',
     snoozeTip: 'Snooze (s)', unsnooze: 'Unsnooze', snoozeTitle: w => `Snooze ${w} until…`, sz_1h: '1 hour', sz_3h: '3 hours', sz_tomorrow: 'Tomorrow 9:00',
     sz_monday: 'Next Monday 9:00', pickTime: 'Pick a date and time', snooze: 'Snooze', untilAt: x => `until ${x}`,
-    promptTip: 'Copy a prompt for your coding agent (a)', promptOf: w => `agent prompt for ${w}`, k_prompt: 'Copy a prompt for your coding agent, tailored to the section',
+    promptTip: 'Copy a prompt for your coding agent (a)', promptOf: w => `agent prompt for ${w}`, k_prompt: 'Copy a prompt for your coding agent',
     ap_review: (url, md) => `Review this PR: ${url}\n\nContext:\n${md}`, ap_fix: (url, list) => `Fix what's blocking my PR ${url}: ${list}.`,
     ap_merge: url => `Merge readiness check for ${url}: confirm CI is green, the branch is up to date with its base and no review thread is left open, then tell me whether it's safe to merge.`,
     ap_check: url => `Look over my PR ${url} and tell me what's still missing before it can merge.`,
@@ -435,7 +437,7 @@ const T = {
     s_draft: 'Drafts', s_merged: 'Mergeados esta semana', s_bots: 'Bots', s_snoozed: 'Pospuestos',
     snoozeTip: 'Posponer (s)', unsnooze: 'Reactivar', snoozeTitle: w => `Posponer ${w} hasta…`, sz_1h: '1 hora', sz_3h: '3 horas', sz_tomorrow: 'Mañana 9:00',
     sz_monday: 'El lunes 9:00', pickTime: 'Elegir fecha y hora', snooze: 'Posponer', untilAt: x => `hasta ${x}`,
-    promptTip: 'Copiar un prompt para tu agente (a)', promptOf: w => `prompt para el agente de ${w}`, k_prompt: 'Copiar un prompt para tu agente, según la sección',
+    promptTip: 'Copiar un prompt para tu agente (a)', promptOf: w => `prompt para el agente de ${w}`, k_prompt: 'Copiar un prompt para tu agente',
     ap_review: (url, md) => `Revisa este PR: ${url}\n\nContexto:\n${md}`, ap_fix: (url, list) => `Arregla lo que bloquea mi PR ${url}: ${list}.`,
     ap_merge: url => `Revisa si ${url} está listo para mergear: confirma que el CI está en verde, que la rama está al día con su base y que no quedan hilos abiertos; después dime si es seguro mergearlo.`,
     ap_check: url => `Revisa mi PR ${url} y dime qué le falta para poder mergearlo.`,
