@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,14 +18,17 @@ from urllib.parse import parse_qs, urlsplit
 
 PORT = int(os.environ.get("PORT", 8765))
 HERE = Path(__file__).parent
-CONFIG = Path(os.environ.get("PUDU_CONFIG") or Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "pudu" / "config.json")
+# why: fixture data through the real pipeline, for screenshots and contributors without gh.
+DEMO = "--demo" in sys.argv[1:] or os.environ.get("PUDU_DEMO") == "1"
+# why: demo clicks (hide, snooze, account) must never touch the user's real config.
+CONFIG = Path(os.environ.get("PUDU_CONFIG") or (
+  Path(tempfile.mkdtemp(prefix="pudu-demo-")) if DEMO else Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "pudu"
+) / "config.json")
 # why: several open tabs share one gh call instead of each burning GraphQL rate limit.
 CACHE_SECONDS = 20
 # why: a held-down refresh key or a looping script can't turn force=1 into a gh call per request.
 FORCE_MIN_SECONDS = 5
 MAX_BODY = 1_000_000
-# why: fixture data through the real pipeline, for screenshots and contributors without gh.
-DEMO = "--demo" in sys.argv[1:] or os.environ.get("PUDU_DEMO") == "1"
 STARTED = time.time()
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"}
 
@@ -33,7 +37,7 @@ NEW_FIELDS = "mergeQueueEntry { position state } autoMergeRequest { enabledAt }"
 FRAGMENT = """
 fragment pr on PullRequest {
   number title url isDraft createdAt updatedAt mergedAt additions deletions changedFiles
-  reviewDecision mergeable mergeStateStatus baseRefName headRefName headRefOid
+  reviewDecision mergeable mergeStateStatus baseRefName headRefName headRefOid isCrossRepository
   viewerLatestReview { commit { oid } }
   mergeQueueEntry { position state } autoMergeRequest { enabledAt }
   repository { name owner { login } nameWithOwner defaultBranchRef { name } }
@@ -74,7 +78,7 @@ EMPTY = {
 # why: readers wait on a running fetch instead of starting their own; that wait is what dedupes gh calls.
 _lock = threading.Lock()
 _config_lock = threading.Lock()
-_cache = {"at": 0.0, "data": None, "error": None, "errorKind": None}
+_cache = {"at": 0.0, "data": None, "error": None, "errorKind": None, "account": None}
 # why: the UI shows a fix per kind (install gh, gh auth login, wait, check the network) instead of raw stderr.
 ERROR_KINDS = [
   ("gh_auth", ("gh auth login", "http 401", "authentication", "bad credentials")),
@@ -145,7 +149,7 @@ def slim(node, me=None):
   rollup = dig(commit, "commit", "statusCheckRollup")
   default = dig(repo, "defaultBranchRef", "name")
   threads = nodes(node, "reviewThreads")
-  p = {
+  return {
     "key": f"{repo.get('nameWithOwner')}#{node.get('number')}",
     "repo": repo.get("nameWithOwner"),
     "owner": dig(repo, "owner", "login"),
@@ -174,6 +178,7 @@ def slim(node, me=None):
     "conflict": node.get("mergeable") == "CONFLICTING",
     "baseRef": node.get("baseRefName"),
     "headRef": node.get("headRefName"),
+    "fork": bool(node.get("isCrossRepository")),
     "stacked": bool(default) and node.get("baseRefName") != default,
     "labels": [{"name": l.get("name"), "color": l.get("color")} for l in nodes(node, "labels")],
     "comments": (dig(node, "comments", "totalCount") or 0) + sum(dig(t, "comments", "totalCount") or 0 for t in threads),
@@ -198,7 +203,6 @@ def slim(node, me=None):
     "autoMerge": bool(node.get("autoMergeRequest")),
     "stackParent": None,
   }
-  return p
 
 
 STRINGS = {
@@ -292,9 +296,7 @@ def md_line(p, lang="en"):
     bits.append(f"+{p['additions']} -{p['deletions']}" + (s["files"].format(n) + "s" * (n != 1) if n is not None else ""))
   if p["labels"]:
     bits.append(s["labels"].format(", ".join(l["name"] for l in p["labels"])))
-  when = next((s[key].format(ago(iso, lang)) for key, iso in (
-    ("requested", p["requestedAt"]), ("merged", p["mergedAt"]), ("updated", p["updatedAt"]),
-  ) if ago(iso)), None)
+  when = next((s[k].format(ago(p[k + "At"], lang)) for k in ("requested", "merged", "updated") if ts(p[k + "At"])), None)
   if when:
     bits.append(when)
   return f"- {p['title'] or s['untitled']} ({p['repo']}#{p['number']}) {p['url']}\n  " + " · ".join(bits)
@@ -329,6 +331,7 @@ def search(q, n, requested=False):
   return graphql(QUERY, q=q, n=n, requested=requested)
 
 
+DEFAULT_HOST = os.environ.get("GH_HOST") or "github.com"
 DEMO_ACCOUNTS = [{"host": "github.com", "user": "crow-demo", "active": True}, {"host": "ghe.acme.dev", "user": "demo-work", "active": True}]
 HOST = re.compile(r"[A-Za-z0-9.-]{1,253}(:\d{1,5})?")
 USER = re.compile(r"[\w-]{1,100}")
@@ -343,6 +346,7 @@ def config_account(c):
 
 
 # why: no account in config means gh's own active account, untouched; a chosen one runs gh as that account.
+# why: gh reads GH_TOKEN only for github.com/ghe.com and GH_ENTERPRISE_TOKEN only for Enterprise Server hosts.
 def gh_env():
   a = config_account(read_config())
   if not a:
@@ -350,7 +354,7 @@ def gh_env():
   k = (a["host"], a["user"])
   if k not in _tokens:
     _tokens[k] = gh("auth", "token", "--hostname", a["host"], "--user", a["user"]).strip()
-  return {**os.environ, "GH_HOST": a["host"], "GH_TOKEN": _tokens[k]}
+  return {**os.environ, "GH_HOST": a["host"], "GH_TOKEN": _tokens[k], "GH_ENTERPRISE_TOKEN": _tokens[k]}
 
 
 def gh_accounts():
@@ -371,15 +375,16 @@ def requested_via(p, me, team=True):
 
 
 def all_prs(d):
-  for path in LISTS:
+  for _, path in MD_SECTIONS:
     yield from dig(d, *path) or []
   for c in d.get("custom") or []:
     yield from c["prs"]
 
 
-def link_stacks(d):
-  heads = {(p["repo"], p["headRef"]): p["number"] for p in all_prs(d)}
-  for p in all_prs(d):
+def link_stacks(d, targets=None):
+  # why: a fork's head branch (often its own main) lives in another repo, so nothing here stacks on it.
+  heads = {(p["repo"], p["headRef"]): p["number"] for p in all_prs(d) if not p["fork"]}
+  for p in targets or all_prs(d):
     parent = heads.get((p["repo"], p["baseRef"]))
     p["stackParent"] = parent if parent != p["number"] else None
   return d
@@ -424,8 +429,7 @@ def build(review_raw, mine_raw, merged_raw, rereview_raw=None, custom=()):
 
 def demo_raws():
   # why: anchored to process start so a refetch doesn't bump every updatedAt and wake demo snoozes.
-  now = datetime.datetime.fromtimestamp(STARTED, datetime.timezone.utc)
-  iso = lambda h: (now - datetime.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")
+  iso = lambda h: iso_at(STARTED - h * 3600)
   me = "crow-demo"
   user = lambda login, kind="User": {"__typename": kind, "login": login, "avatarUrl": None}
 
@@ -546,7 +550,7 @@ def fetch():
     extra = [(s, pool.submit(custom, section_query(s["query"]))) for s in sections]
     accounts = pool.submit(gh_accounts)
     d = build(*(j.result() for j in jobs), [(s, *j.result()) for s, j in extra])
-  host = (config_account(c) or {}).get("host") or os.environ.get("GH_HOST") or "github.com"
+  host = (config_account(c) or {}).get("host") or DEFAULT_HOST
   return {**d, "accounts": accounts.result() or [{"host": host, "user": d["login"], "active": True}]}
 
 
@@ -617,15 +621,11 @@ def custom_sections(c):
   return out[:10]
 
 
-LISTS = [("review", "humans"), ("review", "bots"), *(("mine", k) for k in EMPTY["mine"]), ("merged",)]
-
-
 # why: hiding and snoozing happen here, not in the page, so the tab badge, notifications and /inbox.md all agree.
 # why: md is built here per request because the cache is shared by clients asking in different languages.
 def view(d, c, lang="en"):
-  hidden, snoozed, sleeping, counts, accounts = hidden_repos(c), snoozes(c), {}, {}, d.get("accounts") or []
-  for p in all_prs(d):
-    counts[p["repo"]] = counts.get(p["repo"], 0) + 1
+  hidden, snoozed, sleeping, accounts = hidden_repos(c), snoozes(c), {}, d.get("accounts") or []
+  counts = Counter(p["repo"] for p in all_prs(d))
 
   def keep(prs):
     out = []
@@ -639,17 +639,15 @@ def view(d, c, lang="en"):
         out.append(p)
     return out
 
-  v = {
+  return {
     **d,
     "review": {k: keep(d["review"][k]) for k in EMPTY["review"]},
     "mine": {k: keep(d["mine"][k]) for k in EMPTY["mine"]},
     "merged": keep(d["merged"]),
     "custom": [{**s, "prs": keep(s["prs"])} for s in d["custom"]],
-  }
-  return {
-    **v,
+    # why: after the lists on purpose; keep() above is what fills `sleeping`.
     "snoozed": sorted(sleeping.values(), key=lambda p: p["snoozedUntil"]),
-    "repos": [{"repo": r, "count": counts.get(r, 0), "hidden": r in hidden} for r in sorted(set(counts) | hidden)],
+    "repos": [{"repo": r, "count": counts[r], "hidden": r in hidden} for r in sorted(set(counts) | hidden)],
     "settings": {"staleHours": stale_hours(c)},
     "accounts": accounts,
     "account": current_account(c, accounts),
@@ -658,12 +656,16 @@ def view(d, c, lang="en"):
 
 def current_account(c, accounts):
   active = [a for a in accounts if a["active"]]
-  a = next((a for a in active if a["host"] == (os.environ.get("GH_HOST") or "github.com")), active[0] if active else None)
+  a = next((a for a in active if a["host"] == DEFAULT_HOST), active[0] if active else None)
   return config_account(c) or a and {"host": a["host"], "user": a["user"]}
 
 
 def data(force=False, lang="en"):
   with _lock:
+    c = read_config()
+    # why: a snapshot fetched as another account (or switched mid-fetch) is dropped, never served as stale data.
+    if config_account(c) != _cache["account"]:
+      _cache.update(at=0.0, data=None, account=config_account(c))
     age = time.time() - _cache["at"]
     if (force and age >= FORCE_MIN_SECONDS) or age > CACHE_SECONDS:
       try:
@@ -673,7 +675,6 @@ def data(force=False, lang="en"):
         if _cache["errorKind"] == "gh_auth":
           _tokens.clear()
       _cache["at"] = time.time()
-    c = read_config()
     if DEMO:
       c = {"snoozed": {"octo-labs/docs#212": {"until": iso_at(STARTED + 20 * 3600), "updatedAt": "9999"}}, **c}
     return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"], "errorKind": _cache["errorKind"]}, c, lang)
@@ -699,13 +700,14 @@ def post_snooze(body):
   if not (isinstance(key, str) and KEY.fullmatch(key) and (until is None or isinstance(until, str) and len(until) < 40 and ts(until))):
     return False
   updated = next((p["updatedAt"] for p in all_prs(_cache["data"] or {}) if p["key"] == key), None)
+  # why: without the PR's updatedAt the snooze could only wake on time, never on activity; the UI only snoozes visible PRs.
+  if until and not updated:
+    return False
 
   def change(c):
-    s = snoozes(c)
-    s.pop(key, None)
+    c["snoozed"] = {k: v for k, v in snoozes(c).items() if k != key}
     if until:
-      s[key] = {"until": iso_at(ts(until)), "updatedAt": updated}
-    c["snoozed"] = s
+      c["snoozed"][key] = {"until": iso_at(ts(until)), "updatedAt": updated}
   update_config(change)
   return True
 
@@ -769,8 +771,7 @@ def pr_md(ref, lang="en"):
     if p:
       # why: outside a search we can't tell whether a team request includes you, so only a direct one is claimed.
       p["requestedVia"] = requested_via(p, me, False)
-      p["stackParent"] = next((x["number"] for x in all_prs(_cache["data"] or {})
-                               if x["repo"] == p["repo"] and x["headRef"] == p["baseRef"] and x["number"] != p["number"]), None)
+      link_stacks(_cache["data"] or {}, [p])
     rollup = dig((nodes(node, "detailChecks") or [{}])[0], "commit", "statusCheckRollup")
     checks = list(dict.fromkeys(
       (c.get("name") or c.get("context"), c.get("detailsUrl") or c.get("targetUrl")) for c in nodes(rollup, "contexts")
@@ -853,7 +854,7 @@ class Handler(BaseHTTPRequestHandler):
       return self._send(404, "text/plain", b"not found")
     try:
       ok = body is not None and handler(json.loads(body))
-    except (ValueError, KeyError, TypeError, AttributeError):
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
       ok = False
     if not ok:
       return self._send(400, "text/plain", b"bad request")
@@ -960,7 +961,7 @@ def mcp(inp, out):
       continue
     try:
       msg = json.loads(line)
-    except ValueError:
+    except (ValueError, RecursionError):  # why: deeply nested JSON raises RecursionError, which would end the loop.
       reply = rpc_error(None, -32700, "Parse error")
     else:
       reply = mcp_reply(msg)
@@ -1002,14 +1003,10 @@ def selftest():
     ]},
   }
   p = slim(node, "me")
-  assert p["bot"] and p["conflict"] and p["stacked"] and p["checks"] == "FAILURE"
-  assert p["failedChecks"] == ["lint", "ci/x"]
-  assert p["comments"] == 5 and p["unresolvedThreads"] == 1
-  assert p["labels"] == [{"name": "bug", "color": "d73a4a"}]
+  assert p["bot"] and p["conflict"] and p["stacked"] and p["checks"] == "FAILURE" and p["failedChecks"] == ["lint", "ci/x"]
+  assert (p["comments"], p["unresolvedThreads"], p["threads"], p["requestedAt"]) == (5, 1, 2, "T3")
+  assert p["labels"] == [{"name": "bug", "color": "d73a4a"}] and p["reviews"] == [{"login": "a", "state": "APPROVED", "avatar": "x"}]
   assert p["pending"] == [{"login": "team:devs", "avatar": None}, {"login": "me", "avatar": "m"}]
-  assert p["reviews"] == [{"login": "a", "state": "APPROVED", "avatar": "x"}]
-  assert p["requestedAt"] == "T3"
-  assert p["threads"] == 2
   es, en = md_line(p, "es"), md_line(p)
   assert es.startswith("- t (o/r#1) u\n  @dependabot · feat/x -> feat/base · CI falló (lint, ci/x) · cambios pedidos")
   assert "conflicto" in es and "hilos sin resolver: 1" in es and "+1 -2 en 1 archivo ·" in es
@@ -1028,10 +1025,11 @@ def selftest():
   assert "in merge queue (#3) · auto-merge on" in md_line(q) and "en merge queue (#3) · auto-merge activado" in md_line(q, "es")
   assert requested_via(p, "me") == "direct" and requested_via(p, "x") == "team:devs" and requested_via(p, "x", False) is None
   assert "pedida vía team:devs" in md_line({**p, "requestedVia": "team:devs"}, "es") and "via" not in md_line({**p, "requestedVia": "direct"})
-  a, b, c = ({**p, "number": n, "repo": r, "headRef": h, "baseRef": base} for n, r, h, base in (
-    (1, "o/r", "feat/a", "main"), (2, "o/r", "feat/b", "feat/a"), (3, "o/other", "feat/c", "feat/a")))
-  link_stacks({"mine": {"waiting": [a]}, "custom": [{"prs": [b, c]}]})
-  assert (a["stackParent"], b["stackParent"], c["stackParent"]) == (None, 1, None)
+  a, b, c, f = ({**p, "number": n, "repo": r, "headRef": h, "baseRef": base, "fork": n == 4} for n, r, h, base in (
+    (1, "o/r", "feat/a", "main"), (2, "o/r", "feat/b", "feat/a"), (3, "o/other", "feat/c", "feat/a"), (4, "o/r", "main", "main")))
+  link_stacks({"mine": {"waiting": [a]}, "custom": [{"prs": [b, c, f]}]})
+  assert (a["stackParent"], b["stackParent"], c["stackParent"], f["stackParent"]) == (None, 1, None, None)
+  assert not p["fork"] and slim({**node, "isCrossRepository": True})["fork"]
   assert "feat/b -> feat/a · on top of #1 ·" in md_line(b) and "sobre #1" in md_line(b, "es")
   bare = slim({"number": 9, "repository": None, "author": None, "commits": None, "comments": None})
   assert bare["author"] == "ghost" and bare["checks"] is None and bare["failedChecks"] == [] and not bare["stacked"]
@@ -1060,12 +1058,11 @@ def selftest():
         rl={"cost": 6, "remaining": 90, "resetAt": "R2"}),
     raw({**human, "number": 6, "mergedAt": "2026-01-01T00:00:00Z"}, {**human, "number": 7, "mergedAt": "2026-03-01T00:00:00Z"}),
   )
-  assert out["login"] == "me" and out["avatarUrl"] == "av"
-  assert out["rateLimit"] == {"cost": 13, "remaining": 90, "resetAt": "R2"}
-  assert [p["number"] for p in out["review"]["humans"]] == [2, 1] and [p["number"] for p in out["review"]["bots"]] == [1]
-  assert {k: [p["number"] for p in v] for k, v in out["mine"].items()} == {"returned": [8], "approved": [5], "waiting": [4], "draft": [3]}
-  assert [p["number"] for p in out["merged"]] == [7, 6]
-  assert set(out) | {"error"} == set(EMPTY) | {"error"}
+  assert (out["login"], out["avatarUrl"], out["rateLimit"]) == ("me", "av", {"cost": 13, "remaining": 90, "resetAt": "R2"})
+  nums = lambda prs: [p["number"] for p in prs]
+  assert nums(out["review"]["humans"]) == [2, 1] and nums(out["review"]["bots"]) == [1] and nums(out["merged"]) == [7, 6]
+  assert {k: nums(v) for k, v in out["mine"].items()} == {"returned": [8], "approved": [5], "waiting": [4], "draft": [3]}
+  assert set(out) == set(EMPTY)
   v = view(out, {"hidden": ["o/r", "gone/repo"]})
   assert v["review"]["humans"] == [] and v["mine"]["approved"] == [] and v["merged"] == []
   assert v["repos"] == [{"repo": "gone/repo", "count": 0, "hidden": True}, {"repo": "o/r", "count": 9, "hidden": True}]
@@ -1191,11 +1188,20 @@ def selftest():
     update_config(lambda c: c.update(account={"host": "ghe.x", "user": "w"}))
     search("q", 1), search("q", 1)
     assert [a[1:] for a in argv[1:] if a[1] == "auth"] == [["auth", "token", "--hostname", "ghe.x", "--user", "w"]]
-    assert [(e["GH_HOST"], e["GH_TOKEN"]) for e in envs[2:]] == [("ghe.x", "tok-123")] * 2
+    assert [(e["GH_HOST"], e["GH_TOKEN"], e["GH_ENTERPRISE_TOKEN"]) for e in envs[2:]] == [("ghe.x", "tok-123", "tok-123")] * 2
     CONFIG.write_text("{}")
     _tokens.clear()
   finally:
     subprocess.run = real_run
+
+  # demo mode keeps its config in a throwaway dir unless PUDU_CONFIG says otherwise.
+  env = {k: v for k, v in os.environ.items() if k not in ("PUDU_CONFIG", "PUDU_DEMO")}
+  probe = lambda **e: subprocess.run([sys.executable, "-c", "import server; print(server.CONFIG)"], cwd=HERE, capture_output=True,
+                                     text=True, env={**env, "XDG_CONFIG_HOME": "/x", **e}).stdout.strip()
+  tmp = Path(probe(PUDU_DEMO="1"))
+  assert probe() == "/x/pudu/config.json" and tmp.name == "config.json" and tmp.parent.name.startswith("pudu-demo-")
+  assert probe(PUDU_DEMO="1", PUDU_CONFIG="/c.json") == "/c.json"
+  shutil.rmtree(tmp.parent)
 
   # demo goes through build() and covers every section.
   demo = build(*demo_raws())
@@ -1245,7 +1251,7 @@ def selftest():
     raise RuntimeError("HTTP 502")
   g["graphql"] = boom
   assert pr_md("o/r#1") == (503, "gh: HTTP 502")
-  g["graphql"], g["DEMO"] = (lambda q, **v: {"repository": {"pullRequest": detail}}), True
+  g["graphql"], g["DEMO"] = (lambda q, **v: {"repository": {"pullRequest": detail}}), True  # why: the HTTP checks below fetch this PR.
   code, text = pr_md("acme/api#488")
   g["DEMO"] = False
   assert code == 200 and "## Failed checks\n- test (3.12)\n- lint\n" in text and "gh pr diff 488 -R acme/api" in text
@@ -1255,7 +1261,7 @@ def selftest():
   CONFIG.parent.mkdir(parents=True, exist_ok=True)
   CONFIG.write_text(json.dumps({"hidden": ["x/y"], "future": {"keep": 1}}))
   calls = []
-  g["fetch"] = lambda: (calls.append(1), out)[1]
+  g["fetch"] = ok_fetch = lambda: (calls.append(1), out)[1]
   _cache.update(at=0.0, data=None, error=None, errorKind=None)
   srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
   port = srv.server_port
@@ -1277,9 +1283,8 @@ def selftest():
       assert req("GET", "/inbox.md", Host=host)[0] == 200, host
     for host in (f"evil.com:{port}", "localhost:1", "localhost"):
       assert req("GET", "/inbox.md", Host=host)[0] == 403, host
-    assert req("GET", "/inbox.md", Sec_Fetch_Site="cross-site")[0] == 403
-    assert req("GET", "/inbox.md", Sec_Fetch_Site="same-site")[0] == 403
-    assert req("GET", "/inbox.md", Sec_Fetch_Site="same-origin")[0] == 200
+    for site, want in (("cross-site", 403), ("same-site", 403), ("same-origin", 200)):
+      assert req("GET", "/inbox.md", Sec_Fetch_Site=site)[0] == want, site
     code, body = req("GET", "/pr.md?pr=o/r%231&lang=es")
     assert code == 200 and body.decode().startswith("# o/r#1\n") and "## Checks fallidos" in body.decode()
     assert req("GET", "/pr.md?pr=o/r")[0] == 400 and req("GET", "/pr.md")[0] == 400
@@ -1295,6 +1300,7 @@ def selftest():
       # why: no body — the server can't know how much to read, so unread bytes would turn its close into a flaky RST.
       assert req("POST", "/api/hidden", Content_Type="application/json", Content_Length=n)[0] == 400, n
     assert req("POST", "/api/hidden", json.dumps({"hidden": [1]}), Content_Type="application/json")[0] == 400
+    assert req("POST", "/api/hidden", "[" * 100000, Content_Type="application/json")[0] == 400
     assert json.loads(CONFIG.read_text()) == {"hidden": ["x/y"], "future": {"keep": 1}}
     code, body = req("POST", "/api/hidden", post, Content_Type="application/json")
     assert code == 200 and json.loads(body)["mine"]["approved"] == []
@@ -1307,7 +1313,7 @@ def selftest():
     js = lambda path, payload: req("POST", path, json.dumps(payload), Content_Type="application/json")
     assert js("/api/hidden", {"hidden": []})[0] == 200
     for bad in ({"key": "nope", "until": future}, {"key": "o/r#x", "until": future}, {"key": "o/r#5", "until": "tomorrow"},
-                {"key": "o/r#5", "until": "2030-01-01T00:00:00"}, {"until": future}, {"key": "o/" + "r" * 200 + "#5", "until": future}, ["o/r#5"]):
+                {"key": "o/r#5", "until": "2030-01-01T00:00:00"}, {"until": future}, {"key": "o/" + "r" * 200 + "#5", "until": future}, ["o/r#5"], {"key": "o/r#99", "until": future}):
       assert js("/api/snooze", bad)[0] == 400, bad
     code, body = js("/api/snooze", {"key": "o/r#5", "until": "2030-01-01T00:00:00.000Z"})
     d = json.loads(body)
@@ -1336,7 +1342,7 @@ def selftest():
     assert [(c["id"], len(c["prs"]), c["error"]) for c in f["custom"]] == [("team", 1, None), ("boom", 0, "bad query")]
     assert len(queries) == 6 and "is:pr is:open team-review-requested:o/t archived:false" in queries
     # why: gh without `auth status --json` still gets the account it's logged in as.
-    assert f["accounts"] == [{"host": os.environ.get("GH_HOST") or "github.com", "user": "me", "active": True}]
+    assert f["accounts"] == [{"host": DEFAULT_HOST, "user": "me", "active": True}]
 
     # account: only one gh knows; saved without losing other keys; the reply is a fresh fetch past the throttle.
     CONFIG.write_text(json.dumps({"future": 1}))
@@ -1347,33 +1353,45 @@ def selftest():
     code, body = js("/api/account", {"host": "ghe.acme.dev", "user": "demo-work"})
     assert code == 200 and json.loads(body)["account"] == {"host": "ghe.acme.dev", "user": "demo-work"} and len(calls) == n + 1
     assert json.loads(CONFIG.read_text()) == {"future": 1, "account": {"host": "ghe.acme.dev", "user": "demo-work"}}
+    # a switch that lands while a fetch is in flight: the snapshot labelled with the old account is never served.
+    CONFIG.write_text(json.dumps({"future": 1, "account": {"host": "github.com", "user": "crow-demo"}}))
+    def fail():
+      calls.append(1)
+      raise RuntimeError("HTTP 502")
+    g["fetch"] = fail
+    d = data()
+    assert d["login"] is None and d["errorKind"] == "other" and len(calls) == n + 2
+    g["fetch"] = ok_fetch
+    CONFIG.write_text(json.dumps({"future": 1, "account": {"host": "ghe.acme.dev", "user": "demo-work"}}))
 
     # MCP over stdio: both eras, notifications unanswered, tool failures as isError, nothing but JSON-RPC out.
     import io
     m = lambda version: {"_meta": {META + "protocolVersion": version, META + "clientCapabilities": {}}}
+    rq = lambda i, method, **params: {"jsonrpc": "2.0", "id": i, "method": method, **({"params": params} if params else {})}
+    tool = lambda i, name, args, **params: rq(i, "tools/call", name=name, arguments=args, **params)
     lines = [
-      {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t"}}},
+      rq(1, "initialize", protocolVersion="2025-06-18", capabilities={}, clientInfo={"name": "t"}),
       {"jsonrpc": "2.0", "method": "notifications/initialized"},
-      {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-      {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_inbox", "arguments": {"sections": ["approved"]}}},
-      {"jsonrpc": "2.0", "id": 4, "method": "initialize", "params": {"protocolVersion": "2099-01-01"}},
-      {"jsonrpc": "2.0", "id": 5, "method": "server/discover", "params": m("2026-07-28")},
-      {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "get_pr", "arguments": {"pr": "o/r#1"}, **m("2026-07-28")}},
-      {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "get_pr", "arguments": {"pr": "nope"}, **m("2026-07-28")}},
-      {"jsonrpc": "2.0", "id": 8, "method": "tools/list", "params": m("1900-01-01")},
-      {"jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": {"_meta": {META + "protocolVersion": "2026-07-28"}}},
-      {"jsonrpc": "2.0", "id": 10, "method": "server/discover"},
-      {"jsonrpc": "2.0", "id": 11, "method": "tools/call", "params": {"name": "nope"}},
-      {"jsonrpc": "2.0", "id": 12, "method": "resources/list"},
-      {"jsonrpc": "2.0", "id": 13, "method": "ping"},
-      {"jsonrpc": "2.0", "id": 14, "method": "tools/call", "params": {"name": "list_inbox", "arguments": {"sections": "review"}}},
+      rq(2, "tools/list"),
+      tool(3, "list_inbox", {"sections": ["approved"]}),
+      rq(4, "initialize", protocolVersion="2099-01-01"),
+      rq(5, "server/discover", **m("2026-07-28")),
+      tool(6, "get_pr", {"pr": "o/r#1"}, **m("2026-07-28")),
+      tool(7, "get_pr", {"pr": "nope"}, **m("2026-07-28")),
+      rq(8, "tools/list", **m("1900-01-01")),
+      rq(9, "tools/list", _meta={META + "protocolVersion": "2026-07-28"}),
+      rq(10, "server/discover"),
+      rq(11, "tools/call", name="nope"),
+      rq(12, "resources/list"),
+      rq(13, "ping"),
+      tool(14, "list_inbox", {"sections": "review"}),
       {"jsonrpc": "2.0", "id": 15, "result": {}},
     ]
     sink = io.StringIO()
-    mcp(io.StringIO("\n".join(map(json.dumps, lines)) + "\n\nnot json\n[]\n"), sink)
+    mcp(io.StringIO("\n".join(map(json.dumps, lines)) + "\n\nnot json\n[]\n" + "[" * 100000 + "\n"), sink)
     got = [json.loads(line) for line in sink.getvalue().splitlines()]
     by = {r["id"]: r for r in got}
-    assert len(got) == 16 and set(by) == set(range(1, 15)) | {None}
+    assert len(got) == 17 and set(by) == set(range(1, 15)) | {None}
     assert by[1]["result"]["protocolVersion"] == "2025-06-18" and by[1]["result"]["capabilities"] == {"tools": {}} and "resultType" not in by[1]["result"]
     assert [t["name"] for t in by[2]["result"]["tools"]] == ["list_inbox", "get_pr"] and all(t["annotations"]["readOnlyHint"] for t in by[2]["result"]["tools"])
     assert by[3]["result"]["isError"] is False and by[3]["result"]["content"][0]["text"].startswith("# PRs for @me\n\n## Approved (1)")
@@ -1385,7 +1403,7 @@ def selftest():
     assert by[8]["error"]["code"] == -32022 and by[8]["error"]["data"] == {"supported": MCP_VERSIONS, "requested": "1900-01-01"}
     assert by[9]["error"]["code"] == by[10]["error"]["code"] == by[11]["error"]["code"] == -32602 and by[12]["error"]["code"] == -32601
     assert by[13]["result"] == {} and by[14]["result"]["isError"] is True
-    assert [r["error"]["code"] for r in got if r["id"] is None] == [-32700, -32600]
+    assert [r["error"]["code"] for r in got if r["id"] is None] == [-32700, -32600, -32700]
   finally:
     srv.shutdown()
     srv.server_close()
@@ -1403,7 +1421,7 @@ if __name__ == "__main__":
   elif "--mcp" in sys.argv[1:]:
     # why: stdout carries only JSON-RPC; a stray print anywhere would corrupt the stream, so it goes to stderr.
     proto, sys.stdout = sys.stdout, sys.stderr
-    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     mcp(sys.stdin, proto)
   else:
     print(f"Pudú on http://localhost:{PORT}" + (" (demo data)" if DEMO else ""))
