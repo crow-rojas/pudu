@@ -98,14 +98,18 @@ def nodes(d, *path):
   return [n for n in dig(d, *path, "nodes") or [] if n]
 
 
+# why: "returned" means "your move": blockers first, approval beats open threads, open threads beat waiting.
 def bucket(pr):
   if pr["draft"]:
     return "draft"
-  if pr["decision"] == "CHANGES_REQUESTED":
+  # why: repos without required reviews give reviewDecision null even after someone reviewed.
+  states = {r["state"] for r in pr["reviews"]}
+  decision = pr["decision"] or next((s for s in ("CHANGES_REQUESTED", "APPROVED") if s in states), None)
+  if decision == "CHANGES_REQUESTED" or pr["checks"] in FAILED or pr["conflict"] or pr["mergeState"] == "DIRTY":
     return "returned"
-  if pr["decision"] == "APPROVED":
+  if decision == "APPROVED":
     return "approved"
-  return "waiting"
+  return "returned" if pr["unresolvedThreads"] else "waiting"
 
 
 def requested_at(node, me):
@@ -181,7 +185,7 @@ DECISION_MD = {"APPROVED": "aprobado", "CHANGES_REQUESTED": "cambios pedidos", "
 REVIEW_MD = {"APPROVED": "aprobó", "CHANGES_REQUESTED": "pidió cambios", "COMMENTED": "comentó", "DISMISSED": "descartada"}
 MD_SECTIONS = [
   ("review", "Necesitan tu review", ("review", "humans")),
-  ("returned", "Te devolvieron cambios", ("mine", "returned")),
+  ("returned", "Necesitan tu atención", ("mine", "returned")),
   ("approved", "Aprobados", ("mine", "approved")),
   ("waiting", "Esperando review", ("mine", "waiting")),
   ("draft", "Drafts", ("mine", "draft")),
@@ -471,33 +475,43 @@ def selftest():
   bare = slim({"number": 9, "repository": None, "author": None, "commits": None, "comments": None})
   assert bare["author"] == "ghost" and bare["checks"] is None and bare["failedChecks"] == [] and not bare["stacked"]
 
-  assert bucket(p) == "returned"
-  assert bucket({**p, "draft": True}) == "draft"
-  assert bucket({**p, "decision": "APPROVED"}) == "approved"
-  assert bucket({**p, "decision": None}) == "waiting"
+  clean = {**p, "decision": None, "checks": "SUCCESS", "conflict": False, "mergeState": "CLEAN", "unresolvedThreads": 0, "reviews": []}
+  assert bucket(p) == "returned" and bucket({**p, "draft": True}) == "draft"
+  assert bucket(clean) == "waiting" and bucket({**clean, "decision": "APPROVED"}) == "approved"
+  for bad in ({"decision": "CHANGES_REQUESTED"}, {"checks": "FAILURE"}, {"checks": "ERROR"}, {"conflict": True}, {"mergeState": "DIRTY"}, {"unresolvedThreads": 2}):
+    assert bucket({**clean, **bad}) == "returned", bad
+  assert bucket({**clean, "decision": "APPROVED", "unresolvedThreads": 2}) == "approved"
+  assert bucket({**clean, "decision": "APPROVED", "checks": "FAILURE"}) == "returned"
+  assert bucket({**clean, "reviews": [{"state": "APPROVED"}]}) == "approved"
+  assert bucket({**clean, "reviews": [{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}]}) == "returned"
+  assert bucket({**clean, "decision": "REVIEW_REQUIRED", "reviews": [{"state": "APPROVED"}]}) == "waiting"
 
-  human = {**node, "author": {"__typename": "User", "login": "x"}}
+  human = {
+    **node, "author": {"__typename": "User", "login": "x"}, "reviewDecision": None, "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN", "commits": None, "reviewThreads": None, "latestReviews": None,
+  }
   raw = lambda *ns, rl=None: {"viewer": {"login": "me", "avatarUrl": "av"}, "rateLimit": rl, "search": {"nodes": list(ns)}}
   out = build(
     raw({**human, "number": 1}, {**human, "number": 2, "timelineItems": {"nodes": [{"createdAt": "T0", "requestedReviewer": {"login": "me"}}]}},
         node, None, {}, rl={"cost": 7, "remaining": 100, "resetAt": "R1"}),
     raw({**human, "number": 3, "isDraft": True}, {**human, "number": 4, "updatedAt": "2026-02-01T00:00:00Z", "reviewDecision": None},
-        {**human, "number": 5, "reviewDecision": "APPROVED"}, rl={"cost": 6, "remaining": 90, "resetAt": "R2"}),
+        {**human, "number": 5, "reviewDecision": "APPROVED"}, {**human, "number": 8, "mergeable": "CONFLICTING"},
+        rl={"cost": 6, "remaining": 90, "resetAt": "R2"}),
     raw({**human, "number": 6, "mergedAt": "2026-01-01T00:00:00Z"}, {**human, "number": 7, "mergedAt": "2026-03-01T00:00:00Z"}),
   )
   assert out["login"] == "me" and out["avatarUrl"] == "av"
   assert out["rateLimit"] == {"cost": 13, "remaining": 90, "resetAt": "R2"}
   assert [p["number"] for p in out["review"]["humans"]] == [2, 1] and [p["number"] for p in out["review"]["bots"]] == [1]
-  assert {k: [p["number"] for p in v] for k, v in out["mine"].items()} == {"returned": [], "approved": [5], "waiting": [4], "draft": [3]}
+  assert {k: [p["number"] for p in v] for k, v in out["mine"].items()} == {"returned": [8], "approved": [5], "waiting": [4], "draft": [3]}
   assert [p["number"] for p in out["merged"]] == [7, 6]
   assert set(out) | {"error"} == set(EMPTY) | {"error"}
   v = view(out, {"o/r", "gone/repo"})
   assert v["review"]["humans"] == [] and v["mine"]["approved"] == [] and v["merged"] == []
-  assert v["repos"] == [{"repo": "gone/repo", "count": 0, "hidden": True}, {"repo": "o/r", "count": 8, "hidden": True}]
+  assert v["repos"] == [{"repo": "gone/repo", "count": 0, "hidden": True}, {"repo": "o/r", "count": 9, "hidden": True}]
   assert view(out, set())["review"] == out["review"]
   assert inbox_md(v).startswith("# PRs de @me\n\nRepos ocultos: gone/repo, o/r.\n\n## Necesitan tu review (0)")
   md = inbox_md(out)
-  assert md.startswith("# PRs de @me\n\n## Necesitan tu review (2)\n\n- t (o/r#2)") and "## Te devolvieron cambios (0)\n\n(ninguno)" in md
+  assert md.startswith("# PRs de @me\n\n## Necesitan tu review (2)\n\n- t (o/r#2)") and "## Necesitan tu atención (1)\n\n- t (o/r#8)" in md
   assert inbox_md(out, {"approved"}) == f"# PRs de @me\n\n## Aprobados (1)\n\n{out['mine']['approved'][0]['md']}\n"
   print("ok")
 
