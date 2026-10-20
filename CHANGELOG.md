@@ -34,7 +34,16 @@ All notable changes to Pudú are documented here. The format is based on
   included.
 - PR fields `key`, `requestedVia`, `mergeQueue`, `autoMerge` and `stackParent`. The agent text says
   "requested via team:x", "in merge queue (#2)", "auto-merge on" and "on top of #484".
-- `staleHours` in `config.json`, returned as `settings.staleHours`.
+- `staleHours` in `config.json`: review wait times turn amber past it and red past three times it.
+- Snooze from the UI: `s` or the row's hover button (1 h, 3 h, tomorrow 9:00, next Monday 9:00,
+  custom), and a folded "Snoozed" section to wake PRs early.
+- `a` copies a prompt for your coding agent tailored to the PR: review it, fix what's blocking it,
+  or check it's ready to merge, with the `gh` commands and the `/pr.md` link.
+- Account switcher in the header when `gh` has more than one account logged in.
+- Desktop notifications when one of your PRs turns CI red, gets a conflict, changes requested or new
+  unresolved threads.
+- Stacked PRs drawn under their parent, a ring for PRs updated since you last opened them, and tags
+  for team requests, merge queue position and auto-merge.
 - Linux install: a systemd user service plus a desktop launcher. On WSL the launcher is skipped.
 - CI on Linux and macOS with Python 3.9 and the latest Python, plus shellcheck for `install.sh`.
 - Issue and PR templates, `SECURITY.md` and this changelog.

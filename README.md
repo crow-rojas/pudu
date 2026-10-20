@@ -84,6 +84,8 @@ Press `?` in the page for this list.
 | `[` `]` | Previous or next section |
 | `o` / `Enter` | Open the PR on GitHub |
 | `x` | Mark the PR as seen (clears the dot) |
+| `s` | Snooze the PR (1 h, 3 h, tomorrow, next week, custom) |
+| `a` | Copy a prompt for your coding agent, tailored to the PR's state |
 | `y` | Copy the PR as agent text |
 | `Y` | Copy everything visible as agent text |
 | `c` | Copy the PR's branch name |

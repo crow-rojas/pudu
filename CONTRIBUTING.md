@@ -19,7 +19,7 @@ PORT=8766 python3 server.py              # real data on another port
 ```
 
 - If Pudú is installed as a service, port 8765 is taken. Use another `PORT` for development.
-- Point `PUDU_CONFIG` at a scratch file (`PUDU_CONFIG=/tmp/pudu-dev.json`) so hiding repos or snoozing PRs while testing doesn't touch your real config. Demo mode reads and writes the config file too.
+- Point `PUDU_CONFIG` at a scratch file (`PUDU_CONFIG=/tmp/pudu-dev.json`) so hiding repos or snoozing PRs while testing doesn't touch your real config. Demo mode uses a throwaway config unless you set `PUDU_CONFIG`.
 - Changes to `index.html` show up on reload. Changes to `server.py` need a server restart.
 - To try `install.sh` without replacing your live install, give the copy its own name and port: `PUDU_NAME=pudu-dev PORT=8766 ./install.sh`, then `PUDU_NAME=pudu-dev ./install.sh uninstall`. On macOS both installs share `~/Applications/Pudú.app`, so re-run `./install.sh` for your main install afterwards.
 - Try the MCP server by piping JSON-RPC into it:
