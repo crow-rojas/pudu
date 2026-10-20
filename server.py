@@ -21,6 +21,8 @@ CACHE_SECONDS = 20
 # why: a held-down refresh key or a looping script can't turn force=1 into a gh call per request.
 FORCE_MIN_SECONDS = 5
 MAX_BODY = 1_000_000
+# why: fixture data through the real pipeline, for screenshots and contributors without gh.
+DEMO = "--demo" in sys.argv[1:] or os.environ.get("PUDU_DEMO") == "1"
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"}
 
 QUERY = """
@@ -323,7 +325,90 @@ def build(review_raw, mine_raw, merged_raw, rereview_raw=None):
   }
 
 
+def demo_raws():
+  now = datetime.datetime.now(datetime.timezone.utc)
+  iso = lambda h: (now - datetime.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")
+  me = "lena-park"
+  user = lambda login, kind="User": {"__typename": kind, "login": login, "avatarUrl": None}
+
+  def pr(repo, number, title, author, hours, head, base="main", checks="SUCCESS", failed=(), decision="REVIEW_REQUIRED",
+         reviews=(), pending=(), labels=(), threads=0, conflict=False, draft=False, merged=None, requested=None,
+         size=(40, 12, 3), rereview=False, bot=False):
+    owner, name = repo.split("/")
+    node = {
+      "number": number, "title": title, "url": f"https://github.com/{repo}/pull/{number}", "isDraft": draft,
+      "createdAt": iso(hours + 30), "updatedAt": iso(hours), "mergedAt": merged and iso(merged),
+      "additions": size[0], "deletions": size[1], "changedFiles": size[2], "reviewDecision": decision,
+      "mergeable": "CONFLICTING" if conflict else "MERGEABLE", "mergeStateStatus": "DIRTY" if conflict else "CLEAN",
+      "baseRefName": base, "headRefName": head, "headRefOid": "b2",
+      "viewerLatestReview": {"commit": {"oid": "a1"}} if rereview else None,
+      "repository": {"name": name, "owner": {"login": owner}, "nameWithOwner": repo, "defaultBranchRef": {"name": "main"}},
+      "author": user(author, "Bot" if bot else "User"),
+      "labels": {"nodes": [{"name": n, "color": c} for n, c in labels]},
+      "comments": {"totalCount": 1 + threads},
+      "reviewThreads": {"nodes": [{"isResolved": i >= threads, "comments": {"totalCount": 2}} for i in range(threads + 1)]},
+      "commits": {"nodes": [{"commit": {"committedDate": iso(hours), "statusCheckRollup": checks and {
+        "state": checks, "contexts": {"nodes": [{"name": f, "conclusion": "FAILURE"} for f in failed]},
+      }}}]},
+      "reviewRequests": {"nodes": [{"requestedReviewer": (
+        {"__typename": "Team", "slug": p[5:], "name": p[5:]} if p.startswith("team:") else user(p)
+      )} for p in pending]},
+      "latestReviews": {"nodes": [{"state": s, "author": user(l)} for l, s in reviews]},
+    }
+    if requested is not None:
+      who = user(me) if me in pending else {"__typename": "Team"}
+      node["timelineItems"] = {"nodes": [{"createdAt": iso(requested), "requestedReviewer": who}]}
+    return node
+
+  raw = lambda *ns: {
+    "viewer": {"login": me, "avatarUrl": None}, "rateLimit": {"cost": 1, "remaining": 4987, "resetAt": iso(-0.5)},
+    "search": {"issueCount": len(ns), "nodes": list(ns)},
+  }
+  return (
+    raw(
+      pr("acme/api", 482, "Add idempotency keys to payment webhooks", "diego-m", 5, "feat/webhook-idempotency",
+         pending=(me, "tom-h"), labels=(("payments", "1d76db"),), requested=26, size=(312, 48, 9)),
+      pr("acme/web", 1290, "Migrate settings page to the new form components", "priya-k", 2, "refactor/settings-forms",
+         checks="PENDING", pending=(me,), labels=(("frontend", "fbca04"),), requested=3, size=(520, 610, 22)),
+      pr("octo-labs/infra", 77, "Bump Postgres to 16 in staging", "tom-h", 9, "chore/pg16-staging",
+         pending=("team:platform",), reviews=(("yuki-s", "APPROVED"),), labels=(("infra", "5319e7"),), requested=50),
+      pr("acme/api", 475, "Bump requests from 2.32.3 to 2.32.4", "dependabot", 8, "dependabot/pip/requests-2.32.4",
+         pending=(me,), labels=(("dependencies", "0366d6"),), requested=8, size=(1, 1, 1), bot=True),
+      pr("octo-labs/docs", 210, "Update dependency astro to v5.4", "renovate", 30, "renovate/astro-5.x", checks="FAILURE",
+         failed=("build",), pending=(me,), requested=30, size=(14, 14, 2), bot=True),
+    ),
+    raw(
+      pr("acme/api", 488, "Retry failed invoice exports with backoff", me, 1, "fix/invoice-export-retry", checks="FAILURE",
+         failed=("test (3.12)", "lint"), reviews=(("diego-m", "COMMENTED"),), size=(96, 20, 4)),
+      pr("acme/web", 1285, "Fix timezone drift in the activity feed", me, 20, "fix/feed-timezone", conflict=True,
+         decision="APPROVED", reviews=(("priya-k", "APPROVED"),)),
+      pr("octo-labs/infra", 80, "Split Terraform state per environment", me, 28, "refactor/tf-state-split",
+         decision="CHANGES_REQUESTED", reviews=(("tom-h", "CHANGES_REQUESTED"),), threads=3, size=(210, 180, 14)),
+      pr("acme/api", 484, "Add audit log table", me, 6, "feat/audit-log", decision="APPROVED",
+         reviews=(("diego-m", "APPROVED"), ("yuki-s", "APPROVED")), labels=(("db", "c2e0c6"),), size=(88, 0, 3)),
+      pr("acme/api", 486, "Audit log: write events from the billing service", me, 4, "feat/audit-log-billing",
+         base="feat/audit-log", pending=("diego-m",), size=(143, 9, 6)),
+      pr("octo-labs/docs", 212, "Document the new deploy flow", me, 12, "docs/deploy-flow", checks="PENDING",
+         decision=None, pending=("team:docs",), labels=(("docs", "0075ca"),), size=(64, 5, 2)),
+      pr("acme/web", 1293, "Prototype keyboard shortcuts", me, 3, "spike/shortcuts", draft=True, decision=None),
+    ),
+    raw(
+      pr("acme/api", 479, "Speed up CSV import by streaming rows", me, 20, "perf/csv-stream", decision="APPROVED",
+         merged=20, reviews=(("diego-m", "APPROVED"),)),
+      pr("octo-labs/infra", 74, "Add uptime alerts for the API", me, 70, "feat/uptime-alerts", decision="APPROVED",
+         merged=70, reviews=(("tom-h", "APPROVED"),)),
+    ),
+    raw(
+      pr("acme/web", 1271, "Cache feature flags at the edge", "yuki-s", 1, "feat/edge-flags", decision="CHANGES_REQUESTED",
+         reviews=((me, "CHANGES_REQUESTED"),), rereview=True, size=(77, 31, 5)),
+      pr("acme/api", 460, "Rename billing cycle fields", "diego-m", 40, "chore/billing-names", reviews=((me, "COMMENTED"),)),
+    ),
+  )
+
+
 def fetch():
+  if DEMO:
+    return build(*demo_raws())
   base = "is:pr is:open archived:false"
   # why: GitHub reads merged:>=DATE in UTC; a local date would shift the window near midnight.
   since = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
@@ -578,5 +663,5 @@ if __name__ == "__main__":
   if sys.argv[1:] == ["--test"]:
     selftest()
   else:
-    print(f"Pudú on http://localhost:{PORT}")
+    print(f"Pudú on http://localhost:{PORT}" + (" (demo data)" if DEMO else ""))
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
