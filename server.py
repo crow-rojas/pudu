@@ -70,7 +70,7 @@ _cache = {"at": 0.0, "data": None, "error": None, "errorKind": None}
 ERROR_KINDS = [
   ("gh_auth", ("gh auth login", "http 401", "authentication", "bad credentials")),
   ("rate_limit", ("rate limit",)),
-  ("network", ("could not resolve", "timeout", "timed out", "connection", "network", "no such host", "dial tcp")),
+  ("network", ("could not resolve", "timeout", "timed out", "connect", "network", "no such host", "dial tcp")),
 ]
 
 
