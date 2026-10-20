@@ -669,7 +669,9 @@ def data(force=False, lang="en"):
     age = time.time() - _cache["at"]
     if (force and age >= FORCE_MIN_SECONDS) or age > CACHE_SECONDS:
       try:
-        _cache.update(data=fetch(), error=None, errorKind=None)
+        d = fetch()
+        # why: an account switch during the fetch mixed both accounts' searches; drop it and refetch next call.
+        _cache.update(data=d if config_account(read_config()) == _cache["account"] else None, error=None, errorKind=None)
       except Exception as e:  # why: a network blip keeps showing the last good snapshot, flagged.
         _cache.update(error=str(e), errorKind=error_kind(e))
         if _cache["errorKind"] == "gh_auth":
@@ -1361,6 +1363,14 @@ def selftest():
     g["fetch"] = fail
     d = data()
     assert d["login"] is None and d["errorKind"] == "other" and len(calls) == n + 2
+    # a switch that lands during a successful fetch: that mixed snapshot isn't cached under the new account.
+    def switching_fetch():
+      CONFIG.write_text(json.dumps({"future": 1, "account": {"host": "ghe.acme.dev", "user": "demo-work"}}))
+      return ok_fetch()
+    g["fetch"] = switching_fetch
+    _cache["at"] = 0.0
+    data()
+    assert _cache["data"] is None
     g["fetch"] = ok_fetch
     CONFIG.write_text(json.dumps({"future": 1, "account": {"host": "ghe.acme.dev", "user": "demo-work"}}))
 
