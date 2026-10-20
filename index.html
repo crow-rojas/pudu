@@ -19,7 +19,7 @@
   --sel:color-mix(in srgb,var(--accent) 8%,var(--surface));
   --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-  --cols:8px 22px minmax(0,1fr) 84px 44px 18px 18px 18px 88px 72px;
+  --cols:8px 22px minmax(0,1fr) 148px 70px 30px 24px 44px 40px 90px 66px;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){
@@ -132,10 +132,11 @@ div.sec .sec-h{cursor:default}
 div.sec .chev{visibility:hidden}
 
 /* table */
-.row{display:grid;grid-template-columns:var(--cols);gap:12px;align-items:center;padding:0 14px 0 10px}
+.row{display:grid;grid-template-columns:var(--cols);gap:8px;align-items:center;padding:0 14px 0 10px}
 .cols{height:30px;border-top:1px solid var(--line);color:var(--faint);font-size:12px}
 .cols .i{width:14px;height:14px}
 .cols .r{text-align:right}
+.cols :is(.c-ci,.c-dec,.c-mrg){text-align:center}
 .pr{position:relative;min-height:48px;border-top:1px solid var(--line-2);scroll-margin:60px 0 16px}
 .pr:hover{background:var(--hover)}
 .pr.sel{background:var(--sel);box-shadow:inset 2px 0 0 var(--accent)}
@@ -152,6 +153,8 @@ div.sec .chev{visibility:hidden}
 .t:hover{text-decoration:underline;text-decoration-color:var(--faint);text-underline-offset:3px}
 .meta{display:flex;align-items:center;gap:6px;margin-top:1px;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden}
 .meta .sep{color:var(--faint)}
+.meta .num{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
+.meta .repo{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .tag{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border-radius:5px;font-size:11.5px;background:var(--surface-2);color:var(--muted);flex:none}
 .tag .i{width:12px;height:12px}
 .tag code{font:11px var(--mono);max-width:180px;overflow:hidden;text-overflow:ellipsis}
@@ -166,14 +169,21 @@ div.sec .chev{visibility:hidden}
 .av s{position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;border-radius:50%;display:grid;place-items:center;background:var(--c);color:var(--surface);border:1.5px solid var(--surface);text-decoration:none}
 .av s .i{width:7px;height:7px;stroke-width:4}
 .more{font-size:11px;color:var(--faint);margin-left:4px;align-self:center}
-.thr{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.thr{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .thr .i{width:13px;height:13px}
-.thr.open{color:var(--warn)}
-.st{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--c);color:var(--surface);text-decoration:none}
-.st .i{width:11px;height:11px;stroke-width:3.2}
-.dash{display:block;width:8px;height:1.5px;margin:auto;background:var(--faint);border-radius:1px}
-.size{text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.add{color:var(--ok)}.del{color:var(--bad);margin-left:5px}
+/* why: secondary glyphs stay unfilled so the one filled pill per row carries the verdict. */
+.st{display:grid;place-items:center;height:24px;color:var(--c);text-decoration:none}
+.st .i{width:16px;height:16px}
+.pill{position:relative;display:inline-flex;align-items:center;gap:6px;max-width:100%;height:22px;padding:0 9px 0 8px;border-radius:999px;font-size:12px;font-weight:550;white-space:nowrap;
+  color:color-mix(in srgb,var(--c) 78%,var(--ink));background:color-mix(in srgb,var(--c) 13%,transparent)}
+.pill::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--c)}
+.pill b{min-width:0;font-weight:inherit;overflow:hidden;text-overflow:ellipsis}
+.size{display:grid;grid-template-columns:1fr 40px;gap:4px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.add{color:var(--ok)}.del{color:var(--bad)}.size .zero{color:var(--faint)}
+[data-tip]:is(:hover,:focus-visible){z-index:3}
+[data-tip]:is(:hover,:focus-visible)::after{content:attr(data-tip);position:absolute;right:0;bottom:calc(100% + 6px);width:max-content;max-width:300px;padding:5px 8px;border-radius:6px;
+  background:var(--ink);color:var(--bg);font:500 12px/1.35 var(--font);text-align:left;white-space:normal;pointer-events:none}
+.c-pill [data-tip]::after{right:auto;left:0}
 .when{text-align:right;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .when.w1{color:var(--warn)}.when.w2{color:var(--bad);font-weight:600}
 .empty{padding:12px 16px;border-top:1px solid var(--line);color:var(--muted)}
@@ -198,22 +208,44 @@ dialog form{margin-top:16px;text-align:right}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 .toast code{font:12px var(--mono)}
 
-/* responsive */
-@media (max-width:1100px){
-  :root{--cols:8px 22px minmax(0,1fr) 18px 18px 18px 80px 72px}
+/* responsive: secondary columns drop first; the pill and the age always stay */
+@media (max-width:1280px){
+  :root{--cols:8px 22px minmax(0,1fr) 148px 24px 44px 40px 90px 66px}
   .c-people,.c-thr{display:none!important}
 }
-@media (max-width:800px){
-  :root{--cols:8px 22px minmax(0,1fr) 18px 72px}
-  .c-dec,.c-mrg,.c-size{display:none!important}
+@media (max-width:1100px){
+  :root{--cols:8px 22px minmax(0,1fr) 148px 90px 66px}
+  .c-ci,.c-dec,.c-mrg{display:none!important}
+}
+@media (max-width:1000px){
   .top{gap:10px}
   .brand{width:auto}.brand span{display:none}
-  .search kbd,#copy-all span,#repos-btn span{display:none}
   .shell{grid-template-columns:minmax(0,1fr);padding:8px 10px 24px}
-  .side{position:static;overflow-x:auto;scrollbar-width:none}
-  .nav{display:flex;width:max-content}
+  .side{position:static;overflow-x:auto;scrollbar-width:none;mask-image:linear-gradient(90deg,#000 calc(100% - 40px),transparent)}
+  .nav{display:flex;width:max-content;padding-right:32px}
   .nav .gap{display:none}
+}
+@media (max-width:800px){
+  :root{--cols:8px 22px minmax(0,1fr) 140px 66px}
+  .c-size{display:none!important}
+  .search kbd,#copy-all span,#repos-btn span{display:none}
   .sec-h .hint{display:none}
+}
+@media (max-width:640px){
+  .cols,.c-av{display:none!important}
+  .pr{grid-template-columns:8px minmax(0,1fr) auto auto;grid-template-areas:"new t t time" "new meta pill pill";row-gap:3px;padding-block:8px}
+  .pr .meta .lbl{display:none}
+  .pr .body{display:contents}
+  .pr .c-new{grid-area:new;align-self:start;margin-top:7px}
+  .pr .t{grid-area:t}
+  .pr .meta{grid-area:meta;margin:0}
+  .pr .c-pill{grid-area:pill;justify-self:end;max-width:170px}
+  .pr .c-time{grid-area:time}
+}
+@media (max-width:500px){
+  .top{flex-wrap:wrap;height:auto;padding-block:8px;row-gap:8px}
+  .search{order:9;flex-basis:100%;max-width:none}
+  html{scroll-padding-top:100px}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
@@ -303,7 +335,10 @@ const T = {
     conflictWith: b => `Conflicts with ${b || 'the base branch'}`, behindOf: b => `Behind ${b || 'the base branch'}`, mergeable: 'Ready to merge',
     lines: (n, f) => `${n} lines` + (f == null ? '' : ` in ${f} file${f === 1 ? '' : 's'}`),
     requested: 'Review requested', updated: 'Updated', waitCol: 'Waiting', draft: 'Draft', stackedOn: b => `Stacked on ${b}`, new: 'New',
-    title: 'Title', reviewers: 'Reviewers', threads: 'Unresolved threads', changes: 'Changes', noMatch: 'No PR matches the filter.',
+    title: 'Title', reviewers: 'Reviewers', changes: 'Changes', status: 'Status', h_ci: 'CI', h_review: 'Review', h_merge: 'Merge',
+    noCi: 'No CI checks', mergeUnknown: 'Mergeability unknown', conflict: 'Conflict', ciFailedOn: c => `CI failed: ${c}`, behind: 'Behind base',
+    rereview: 'Re-review', rereviewTip: 'New commits since your review', waiting: 'Waiting for review',
+    openThreads: n => `${n} open thread${n === 1 ? '' : 's'}`, noMatch: 'No PR matches the filter.',
     someRepos: (a, b) => `${a} of ${b} repos`, allRepos: 'All repos', saveReposFail: "Couldn't save the repos:",
     noServer: e => `Can't reach the local server (${e}). Retrying every minute.`,
     apiPoints: (n, at) => `${n} API points left` + (at ? `, resets at ${at}` : ''),
@@ -347,7 +382,10 @@ const T = {
     conflictWith: b => `Conflicto con ${b || 'la base'}`, behindOf: b => `Atrás de ${b || 'la base'}`, mergeable: 'Listo para mergear',
     lines: (n, f) => `${n} líneas` + (f == null ? '' : ` en ${f} archivo${f === 1 ? '' : 's'}`),
     requested: 'Te pidieron review', updated: 'Actualizado', waitCol: 'Espera', draft: 'Draft', stackedOn: b => `Apilado sobre ${b}`, new: 'Nuevo',
-    title: 'Título', reviewers: 'Reviewers', threads: 'Hilos sin resolver', changes: 'Cambios', noMatch: 'Ningún PR coincide con el filtro.',
+    title: 'Título', reviewers: 'Reviewers', changes: 'Cambios', status: 'Estado', h_ci: 'CI', h_review: 'Review', h_merge: 'Merge',
+    noCi: 'Sin checks de CI', mergeUnknown: 'No se sabe si se puede mergear', conflict: 'Conflicto', ciFailedOn: c => `CI falló: ${c}`, behind: 'Atrás de la base',
+    rereview: 'Re-review', rereviewTip: 'Commits nuevos desde tu review', waiting: 'Esperando review',
+    openThreads: n => `${n} hilo${n === 1 ? '' : 's'} sin resolver`, noMatch: 'Ningún PR coincide con el filtro.',
     someRepos: (a, b) => `${a} de ${b} repos`, allRepos: 'Todos los repos', saveReposFail: 'No pude guardar los repos:',
     noServer: e => `No hay conexión con el server local (${e}). Sigo intentando cada minuto.`,
     apiPoints: (n, at) => `${n} puntos de API` + (at ? `, se renueva a las ${at}` : ''),
@@ -381,6 +419,7 @@ const arr = a => Array.isArray(a) ? a : [];
 const keyOf = p => `${p.repo}#${p.number}`;
 const repoName = p => p.name || String(p.repo || '').split('/').pop() || '?';
 const num = new Intl.NumberFormat(LANG);
+const compact = new Intl.NumberFormat(LANG, {notation: 'compact'});
 const rtf = new Intl.RelativeTimeFormat(LANG, {numeric: 'auto', style: 'short'});
 const hhmm = ms => new Date(ms).toLocaleTimeString(LANG, {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
 const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -389,9 +428,12 @@ const P = {
   check: '<path d="M20 6 9 17l-5-5"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  dot: '<circle cx="12" cy="12" r="3" fill="currentColor"/>',
   comment: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/>',
-  ci: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  ciOk: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  ciBad: '<circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/>',
+  userOk: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="m16 11 2 2 4-4"/>',
+  userBad: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="m17 8 4 4M21 8l-4 4"/>',
+  minus: '<path d="M9 12h6"/>',
   stack: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
@@ -403,7 +445,6 @@ const P = {
   merge: '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 7.5v9M6 7.5c0 4 4 4.5 9.5 4.5"/>',
   draft: '<circle cx="12" cy="12" r="8" stroke-dasharray="3.2 3.2"/>',
   alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
-  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
   chev: '<path d="m9 6 6 6-6 6"/>',
   behind: '<path d="M12 4v12M6 10l6 6 6-6"/>',
   repo: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15Z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>',
@@ -414,11 +455,11 @@ const ico = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="no
 // why: titles must match MD_SECTIONS in server.py so a copied section reads the same as /inbox.md.
 const SECTIONS = [
   {id: 'review', urgent: true, when: 'wait', get: d => d.review?.humans},
-  {id: 'returned', urgent: true, get: d => d.mine?.returned},
-  {id: 'approved', get: d => d.mine?.approved},
-  {id: 'waiting', get: d => d.mine?.waiting},
-  {id: 'draft', get: d => d.mine?.draft},
-  {id: 'merged', when: 'merged', gapBefore: true, get: d => d.merged},
+  {id: 'returned', urgent: true, mine: true, get: d => d.mine?.returned},
+  {id: 'approved', mine: true, get: d => d.mine?.approved},
+  {id: 'waiting', mine: true, get: d => d.mine?.waiting},
+  {id: 'draft', mine: true, get: d => d.mine?.draft},
+  {id: 'merged', when: 'merged', gapBefore: true, mine: true, get: d => d.merged},
   {id: 'bots', get: d => d.review?.bots},
 ].map(s => ({...s, title: t('s_' + s.id)}));
 const NOTIFY_ON = ['review', 'returned', 'approved'];
@@ -465,7 +506,8 @@ function avatar(login, src, {cls = '', state, title} = {}) {
     ? `<img src="${safeUrl(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" width="22" height="22">`
     : `<span class="ini">${esc(name.slice(0, isTeam ? 2 : 1))}</span>`;
   const badge = state ? `<s style="--c:var(${state[1]})">${ico(state[0])}</s>` : '';
-  return `<span class="av ${cls} ${isTeam ? 'team' : ''}" title="${esc(title || login)}">${img}${badge}</span>`;
+  const tip = esc(title || login);
+  return `<span class="av ${cls} ${isTeam ? 'team' : ''}" role="img" aria-label="${tip}" title="${tip}">${img}${badge}</span>`;
 }
 const REVIEW_STATE = {
   APPROVED: ['check', '--ok', 'r_APPROVED'],
@@ -486,75 +528,96 @@ function people(p) {
 }
 function threads(p) {
   const total = Number(p.threads), open = Number(p.unresolvedThreads) || 0;
-  if (!(total > 0)) return '<span class="c-thr"></span>';
-  const tip = open ? t('thrOpen', open, total) : t('thrDone', total);
-  return `<span class="thr c-thr z ${open ? 'open' : ''}" title="${esc(tip)}">${ico('comment')}${total - open}/${total}</span>`;
+  if (!open) return '<span class="c-thr"></span>';
+  return `<span class="thr c-thr z" data-tip="${esc(t('thrOpen', open, total || open))}">${ico('comment')}${open}</span>`;
 }
-const dash = cls => `<span class="${cls}"><i class="dash"></i></span>`;
-const status = (cls, [icon, color, tip], href = '') => href
-  ? `<a class="st ${cls} z" style="--c:var(${color})" href="${href}" target="_blank" rel="noopener" title="${esc(tip)}" aria-label="${esc(tip)}">${ico(icon)}</a>`
-  : `<span class="st ${cls} z" style="--c:var(${color})" title="${esc(tip)}" aria-label="${esc(tip)}">${ico(icon)}</span>`;
+const status = (cls, [icon, color, tip], href = '') => {
+  const attrs = `class="st ${cls} z" style="--c:var(${color})" data-tip="${esc(tip)}" aria-label="${esc(tip)}"`;
+  return href ? `<a ${attrs} href="${href}" target="_blank" rel="noopener">${ico(icon)}</a>` : `<span ${attrs} role="img" tabindex="0">${ico(icon)}</span>`;
+};
 const CI = {
-  SUCCESS: ['check', '--ok', t('ci_SUCCESS')],
-  FAILURE: ['x', '--bad', t('ci_FAILURE')],
-  ERROR: ['x', '--bad', t('ci_ERROR')],
-  PENDING: ['dot', '--warn', t('ci_PENDING')],
-  EXPECTED: ['dot', '--warn', t('ci_EXPECTED')],
+  SUCCESS: ['ciOk', '--ok'], FAILURE: ['ciBad', '--bad'], ERROR: ['ciBad', '--bad'], PENDING: ['clock', '--warn'], EXPECTED: ['clock', '--warn'],
 };
 function ci(p) {
   const c = CI[p.checks];
-  if (!c) return dash('c-ci');
-  const failed = arr(p.failedChecks).filter(Boolean);
-  return status('c-ci', [c[0], c[1], failed.length ? `${c[2]}: ${failed.join(', ')}` : c[2]], safeUrl(p.url) ? `${safeUrl(p.url)}/checks` : '');
+  if (!c) return status('c-ci', ['minus', '--faint', t('noCi')]);
+  const failed = arr(p.failedChecks).filter(Boolean), tip = t('ci_' + p.checks);
+  return status('c-ci', [...c, failed.length ? `${tip}: ${failed.join(', ')}` : tip], safeUrl(p.url) ? `${safeUrl(p.url)}/checks` : '');
 }
-const DECISION = {APPROVED: ['check', '--ok', t('approved')], CHANGES_REQUESTED: ['x', '--bad', t('changesReq')]};
-const decision = p => DECISION[p.decision] ? status('c-dec', DECISION[p.decision]) : `<span class="c-dec" title="${p.decision === 'REVIEW_REQUIRED' ? t('reviewMissing') : t('noReview')}"><i class="dash"></i></span>`;
+// why: reviewDecision is null on repos without required reviews; latest reviews still say what happened.
+const decisionOf = p => p.decision || (arr(p.reviews).some(r => r?.state === 'CHANGES_REQUESTED') ? 'CHANGES_REQUESTED'
+  : arr(p.reviews).some(r => r?.state === 'APPROVED') ? 'APPROVED' : null);
+function decision(p) {
+  const dec = decisionOf(p);
+  if (dec === 'APPROVED') return status('c-dec', ['userOk', '--ok', t('approved')]);
+  if (dec === 'CHANGES_REQUESTED') return status('c-dec', ['userBad', '--bad', t('changesReq')]);
+  return status('c-dec', ['minus', '--faint', p.decision === 'REVIEW_REQUIRED' ? t('reviewMissing') : t('noReview')]);
+}
 function mergeable(p, sec) {
-  if (sec.id === 'merged') return status('c-mrg', ['merge', '--merged', t('merged')]);
+  if (sec.id === 'merged') return '<span class="c-mrg"></span>';
   if (p.conflict || p.mergeState === 'DIRTY') return status('c-mrg', ['alert', '--bad', t('conflictWith', p.baseRef)]);
   if (p.mergeState === 'BEHIND') return status('c-mrg', ['behind', '--warn', t('behindOf', p.baseRef)]);
   if (['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].includes(p.mergeState)) return status('c-mrg', ['merge', '--ok', t('mergeable')]);
-  return dash('c-mrg');
+  return status('c-mrg', ['minus', '--faint', t('mergeUnknown')]);
 }
+// why: worst first; the first entry is the pill, all of them feed the screen-reader summary.
+function states(p, sec) {
+  if (sec.id === 'merged') return [];
+  const out = [], dec = decisionOf(p), failed = arr(p.failedChecks).filter(Boolean);
+  const add = (tone, label, tip = label) => out.push({tone, label, tip});
+  if (p.conflict || p.mergeState === 'DIRTY') add('bad', t('conflict'), t('conflictWith', p.baseRef));
+  if (p.checks === 'FAILURE' || p.checks === 'ERROR') add('bad', failed.length ? t('ciFailedOn', failed[0]) : t('ci_' + p.checks), failed.length ? `${t('ci_' + p.checks)}: ${failed.join(', ')}` : undefined);
+  if (dec === 'CHANGES_REQUESTED') add('bad', t('changesReq'));
+  if (p.mergeState === 'BEHIND') add('warn', t('behind'), t('behindOf', p.baseRef));
+  if (p.checks === 'PENDING' || p.checks === 'EXPECTED') add('warn', t('ci_PENDING'), t('ci_' + p.checks));
+  if (p.rereview) add('accent', t('rereview'), t('rereviewTip'));
+  if (dec === 'APPROVED') add('ok', p.mergeState === 'BLOCKED' ? t('approved') : t('mergeable'));
+  if (Number(p.unresolvedThreads) > 0) add('warn', t('openThreads', Number(p.unresolvedThreads)));
+  if (!out.length) add('muted', p.draft ? t('draft') : t('waiting'));
+  return out;
+}
+const pill = s => s ? `<span class="c-pill z"><span class="pill" style="--c:var(--${s.tone})" data-tip="${esc(s.tip)}" aria-hidden="true"><b>${esc(s.label)}</b></span></span>` : '<span class="c-pill"></span>';
+const cnum = n => (n >= 1e4 ? compact : num).format(n);
 function size(p) {
-  const a = Number(p.additions), d = Number(p.deletions);
+  const a = Number(p.additions), d = Number(p.deletions) || 0;
   if (p.additions == null || !Number.isFinite(a)) return '<span class="size c-size"></span>';
-  const files = Number.isFinite(Number(p.changedFiles)) && p.changedFiles != null ? p.changedFiles : null;
-  return `<span class="size c-size z" title="${esc(t('lines', num.format(a + (d || 0)), files))}">`
-    + `${a ? `<span class="add">+${num.format(a)}</span>` : ''}${d ? `<span class="del">-${num.format(d)}</span>` : ''}</span>`;
+  return `<span class="size c-size z" data-tip="${esc(t('lines', num.format(a + d), p.changedFiles ?? null))}">`
+    + `<span class="add${a ? '' : ' zero'}">+${cnum(a)}</span><span class="del${d ? '' : ' zero'}">−${cnum(d)}</span></span>`;
 }
 function when(p, sec) {
   const [iso, label] = sec.when === 'wait' ? [p.requestedAt || p.createdAt, t('requested')]
     : sec.when === 'merged' ? [p.mergedAt, t('merged')] : [p.updatedAt, t('updated')];
-  return Date.parse(iso) ? `<time class="when c-time z" data-t="${esc(iso)}" data-urgent="${sec.when === 'wait' ? 1 : ''}" datetime="${esc(iso)}" title="${esc(label + ' ' + fullDate(iso))}"></time>` : '<span class="c-time"></span>';
+  return Date.parse(iso) ? `<time class="when c-time z" data-t="${esc(iso)}" data-urgent="${sec.when === 'wait' ? 1 : ''}" datetime="${esc(iso)}" data-tip="${esc(label + ' ' + fullDate(iso))}"></time>` : '<span class="c-time"></span>';
 }
 function flags(p, sec) {
   const out = [];
   if (p.draft && sec.id !== 'draft') out.push(`<span class="tag">${ico('draft')}${t('draft')}</span>`);
-  if (p.stacked && p.baseRef) out.push(`<span class="tag z" title="${esc(t('stackedOn', p.baseRef))}">${ico('stack')}<code>${esc(p.baseRef)}</code></span>`);
+  if (p.stacked && p.baseRef) out.push(`<span class="tag z" data-tip="${esc(t('stackedOn', p.baseRef))}">${ico('stack')}<code>${esc(p.baseRef)}</code></span>`);
   const ls = arr(p.labels).filter(l => l && l.name);
   for (const l of ls.slice(0, 2)) {
     const c = /^[0-9a-f]{6}$/i.test(l.color || '') ? `style="--lc:#${l.color}"` : '';
     out.push(`<span class="tag lbl"><i ${c}></i>${esc(l.name)}</span>`);
   }
-  if (ls.length > 2) out.push(`<span class="tag z" title="${esc(ls.slice(2).map(l => l.name).join(', '))}">+${ls.length - 2}</span>`);
+  if (ls.length > 2) out.push(`<span class="tag z" data-tip="${esc(ls.slice(2).map(l => l.name).join(', '))}">+${ls.length - 2}</span>`);
   return out.join('');
 }
 function row(p, sec) {
-  const k = keyOf(p), id = `${sec.id}|${k}`;
+  const k = keyOf(p), id = `${sec.id}|${k}`, st = states(p, sec);
+  const summary = st.length ? `<span class="sr">. ${esc(st.map(s => s.label).join(', '))}</span>` : '';
   return `<article class="pr row${S.sel === id ? ' sel' : ''}" data-id="${esc(id)}" data-key="${esc(k)}" data-ref="${esc(p.headRef || '')}">
-    <span>${S.seen.has(k) ? '' : `<i class="new" title="${t('new')}"></i>`}</span>
-    ${avatar(p.author, p.authorAvatar)}
+    <span class="c-new">${S.seen.has(k) ? '' : `<i class="new" role="img" aria-label="${t('new')}" title="${t('new')}"></i>`}</span>
+    ${sec.mine ? '<span class="c-av"></span>' : avatar(p.author, p.authorAvatar, {cls: 'c-av'})}
     <div class="body">
-      <a class="t" href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">${esc(p.title || t('noTitle'))}</a>
-      <div class="meta"><span>${esc(p.author)}</span><span class="sep">·</span><span title="${esc(p.repo)}">${esc(repoName(p))} #${esc(p.number)}</span>${flags(p, sec)}</div>
+      <a class="t" href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">${esc(p.title || t('noTitle'))}${summary}</a>
+      <div class="meta"><span class="num">#${esc(p.number)}</span><span class="repo" title="${esc(p.repo)}">${esc(repoName(p))}</span>`
+      + `${sec.mine ? '' : `<span class="sep">·</span><span>${esc(p.author)}</span>`}${flags(p, sec)}</div>
     </div>
-    ${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
+    ${pill(st[0])}${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
   </article>`;
 }
-const colsHead = sec => `<div class="row cols" aria-hidden="true"><span></span><span></span><span>${t('title')}</span>
-  <span class="c-people r">${t('reviewers')}</span><span class="c-thr" title="${t('threads')}">${ico('comment')}</span>
-  <span class="c-ci" title="CI">${ico('ci')}</span><span class="c-dec" title="Review">${ico('eye')}</span><span class="c-mrg" title="Mergeable">${ico('merge')}</span>
+const colsHead = sec => `<div class="row cols" aria-hidden="true"><span class="c-new"></span><span class="c-av"></span><span>${t('title')}</span>
+  <span class="c-pill">${sec.id === 'merged' ? '' : t('status')}</span><span class="c-people r">${t('reviewers')}</span><span class="c-thr">${ico('comment')}</span>
+  <span class="c-ci">${t('h_ci')}</span><span class="c-dec">${t('h_review')}</span><span class="c-mrg">${sec.id === 'merged' ? '' : t('h_merge')}</span>
   <span class="c-size r">${t('changes')}</span><span class="c-time r">${t(sec.when === 'wait' ? 'waitCol' : sec.when === 'merged' ? 'merged' : 'updated')}</span></div>`;
 
 /* text for Claude */
