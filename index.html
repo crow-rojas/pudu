@@ -160,6 +160,9 @@ div.sec .sec-h{cursor:default}
 .pr:has(.t:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
 .z{position:relative;z-index:1}
 .new{display:block;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.new.upd{background:none;box-shadow:inset 0 0 0 1.5px var(--accent)}
+.kid .body{position:relative;padding-left:calc(var(--d) * 18px)}
+.kid .body::before{content:"";position:absolute;left:calc(var(--d) * 18px - 13px);top:-1px;width:8px;height:17px;border:solid color-mix(in srgb,var(--faint) 55%,transparent);border-width:0 0 1.5px 1.5px;border-bottom-left-radius:5px}
 .av{position:relative;flex:none;width:22px;height:22px}
 .av img,.av .ini{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);object-fit:cover}
 .av .ini{font:650 10px/1 var(--font);color:var(--muted);text-transform:uppercase}
@@ -354,7 +357,7 @@ const T = {
     approved: 'Approved', changesReq: 'Changes requested', reviewMissing: 'Review required', noReview: 'No review yet', merged: 'Merged',
     conflictWith: b => `Conflicts with ${b || 'the base branch'}`, behindOf: b => `Behind ${b || 'the base branch'}`, mergeable: 'Ready to merge',
     lines: (n, f) => `${n} lines` + (f == null ? '' : ` in ${f} file${f === 1 ? '' : 's'}`),
-    requested: 'Review requested', updated: 'Updated', waitCol: 'Waiting', draft: 'Draft', stackedOn: b => `Stacked on ${b}`, new: 'New',
+    updatedSince: 'Updated since you last looked', requested: 'Review requested', updated: 'Updated', waitCol: 'Waiting', draft: 'Draft', stackedOn: b => `Stacked on ${b}`, new: 'New',
     title: 'Title', reviewers: 'Reviewers', changes: 'Changes', status: 'Status', h_ci: 'CI', h_review: 'Review', h_merge: 'Merge',
     noCi: 'No CI checks', mergeUnknown: 'Mergeability unknown', conflict: 'Conflict', ciFailedOn: c => `CI failed: ${c}`, behind: 'Behind base',
     rereview: 'New commits', rereviewTip: 'New commits since your review', waiting: 'Waiting for review',
@@ -405,7 +408,7 @@ const T = {
     approved: 'Aprobado', changesReq: 'Cambios pedidos', reviewMissing: 'Falta review', noReview: 'Sin review', merged: 'Mergeado',
     conflictWith: b => `Conflicto con ${b || 'la base'}`, behindOf: b => `Atrás de ${b || 'la base'}`, mergeable: 'Listo para mergear',
     lines: (n, f) => `${n} líneas` + (f == null ? '' : ` en ${f} archivo${f === 1 ? '' : 's'}`),
-    requested: 'Te pidieron review', updated: 'Actualizado', waitCol: 'Espera', draft: 'Draft', stackedOn: b => `Apilado sobre ${b}`, new: 'Nuevo',
+    updatedSince: 'Cambió desde la última vez que lo viste', requested: 'Te pidieron review', updated: 'Actualizado', waitCol: 'Espera', draft: 'Draft', stackedOn: b => `Apilado sobre ${b}`, new: 'Nuevo',
     title: 'Título', reviewers: 'Reviewers', changes: 'Cambios', status: 'Estado', h_ci: 'CI', h_review: 'Review', h_merge: 'Merge',
     noCi: 'Sin checks de CI', mergeUnknown: 'No se sabe si se puede mergear', conflict: 'Conflicto', ciFailedOn: c => `CI falló: ${c}`, behind: 'Atrás de la base',
     rereview: 'Commits nuevos', rereviewTip: 'Commits nuevos desde tu review', waiting: 'Esperando review',
@@ -450,7 +453,10 @@ const compact = new Intl.NumberFormat(LANG, {notation: 'compact'});
 const rtf = new Intl.RelativeTimeFormat(LANG, {numeric: 'auto', style: 'short'});
 const hhmm = ms => new Date(ms).toLocaleTimeString(LANG, {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
 // why: a branch name may legally hold $( ; or backticks; single quotes keep a pasted ref inert.
-const shq = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
+const shq = s => /^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`;
+// why: gh needs HOST/OWNER/REPO for GitHub Enterprise; github.com keeps the short form.
+const ghRepo = p => { const h = /^https:\/\/([^/]+)\//.exec(p.url || '')?.[1]; return shq(h && h !== 'github.com' ? `${h}/${p.repo}` : p.repo); };
+const checkoutCmd = p => `gh pr checkout ${Number(p.number)} -R ${ghRepo(p)}`;
 const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const P = {
@@ -496,7 +502,7 @@ const NOTIFY_ON = ['review', 'returned', 'approved'];
 const S = {
   data: null, netError: null, loading: false, lastLoad: 0,
   q: '',
-  seen: new Set(arr(store.get('seen', []))), seenSeeded: store.has('seen'),
+  seen: new Set(arr(store.get('seen', []))), seenSeeded: store.has('seen'), opened: store.get('opened', null) || {},
   notify: store.get('notify', false) === true,
   closed: new Set(arr(store.get('closed', ['bots']))),
   sel: null, retryTimer: null, visible: {}, cached: false, err: null, hiddenWant: null, netRaw: '', gen: 0,
@@ -595,10 +601,11 @@ function states(p, sec) {
   const add = (tone, label, tip = label) => out.push({tone, label, tip});
   if (p.conflict || p.mergeState === 'DIRTY') add('bad', t('conflict'), t('conflictWith', p.baseRef));
   if (p.checks === 'FAILURE' || p.checks === 'ERROR') add('bad', failed.length ? t('ciFailedOn', failed[0]) : t('ci_' + p.checks), failed.length ? `${t('ci_' + p.checks)}: ${failed.join(', ')}` : undefined);
+  // why: new commits after your review are the actionable part, even when your own verdict was "changes".
+  if (p.rereview) add('accent', t('rereview'), t('rereviewTip'));
   if (dec === 'CHANGES_REQUESTED') add('bad', t('changesReq'));
   if (p.mergeState === 'BEHIND') add('warn', t('behind'), t('behindOf', p.baseRef));
   if (p.checks === 'PENDING' || p.checks === 'EXPECTED') add('warn', t('ci_PENDING'), t('ci_' + p.checks));
-  if (p.rereview) add('accent', t('rereview'), t('rereviewTip'));
   if (dec === 'APPROVED') add('ok', p.mergeState === 'BLOCKED' ? t('approved') : t('mergeable'));
   if (Number(p.unresolvedThreads) > 0) add('warn', t('openThreads', Number(p.unresolvedThreads)));
   // why: a section's default state ("waiting" in a review queue) is noise; pills only when there's news.
@@ -618,14 +625,16 @@ function when(p, sec) {
     : sec.when === 'merged' ? [p.mergedAt, t('merged')] : [p.updatedAt, t('updated')];
   return Date.parse(iso) ? `<time class="when c-time z" data-t="${esc(iso)}" data-urgent="${sec.when === 'wait' ? 1 : ''}" datetime="${esc(iso)}" data-tip="${esc(label + ' ' + fullDate(iso))}"></time>` : '<span class="c-time"></span>';
 }
-function flags(p, sec) {
+function flags(p, sec, depth) {
   const out = [];
   if (p.draft && sec.id !== 'draft') out.push(`<span class="tag">${ico('draft')}${t('draft')}</span>`);
   const team = /^team:(.+)/.exec(p.requestedVia || '')?.[1];
   if (team) out.push(`<span class="tag z" data-tip="${esc(t('viaTeamTip', team))}">${esc(t('viaTeam', team))}</span>`);
   if (p.mergeQueue) out.push(`<span class="tag z" data-tip="${esc(t('queueTip', p.mergeQueue.state || ''))}">${ico('merge')}${esc(t('queue', Number(p.mergeQueue.position) || 0))}</span>`);
   if (p.autoMerge) out.push(`<span class="tag z" data-tip="${esc(t('autoMergeTip'))}">${ico('merge')}${t('autoMerge')}</span>`);
-  if (p.stacked && p.baseRef) out.push(`<span class="tag z" data-tip="${esc(t('stackedOn', p.baseRef))}">${ico('stack')}<code>${esc(p.baseRef)}</code></span>`);
+  // why: a child drawn under its parent already shows the stack through the connector.
+  if (!depth && p.stackParent) out.push(`<span class="tag z" data-tip="${esc(t('stackedOn', p.baseRef))}">${ico('stack')}${esc(t('onTopOf', p.stackParent))}</span>`);
+  else if (!depth && p.stacked && p.baseRef) out.push(`<span class="tag z" data-tip="${esc(t('stackedOn', p.baseRef))}">${ico('stack')}<code>${esc(p.baseRef)}</code></span>`);
   const ls = arr(p.labels).filter(l => l && l.name);
   for (const l of ls.slice(0, 2)) {
     const c = /^[0-9a-f]{6}$/i.test(l.color || '') ? `style="--lc:#${l.color}"` : '';
@@ -634,16 +643,31 @@ function flags(p, sec) {
   if (ls.length > 2) out.push(`<span class="tag z" data-tip="${esc(ls.slice(2).map(l => l.name).join(', '))}">+${ls.length - 2}</span>`);
   return out.join('');
 }
-function row(p, sec) {
+// why: a stack reads bottom-up, so each child sits right under the PR it builds on.
+function stackOrder(prs) {
+  const keys = new Set(prs.map(keyOf)), kids = new Map(), out = [], done = new Set();
+  const parentOf = p => p.stackParent != null && keys.has(`${p.repo}#${p.stackParent}`) ? `${p.repo}#${p.stackParent}` : null;
+  for (const p of prs) { const k = parentOf(p); if (k) kids.set(k, [...(kids.get(k) || []), p]); }
+  const walk = (p, depth) => { if (done.has(p)) return; done.add(p); out.push([p, depth]); for (const c of kids.get(keyOf(p)) || []) walk(c, depth + 1); };
+  for (const p of prs) if (!parentOf(p)) walk(p, 0);
+  for (const p of prs) walk(p, 0);
+  return out;
+}
+function dot(p) {
+  const k = keyOf(p), opened = S.opened[k];
+  if (!S.seen.has(k)) return `<i class="new" role="img" aria-label="${t('new')}" title="${t('new')}"></i>`;
+  return opened && Date.parse(p.updatedAt) > opened ? `<i class="new upd" role="img" aria-label="${t('updatedSince')}" title="${t('updatedSince')}"></i>` : '';
+}
+function row(p, sec, depth = 0) {
   const k = keyOf(p), id = `${sec.id}|${k}`, st = states(p, sec);
   const summary = st.length ? `<span class="sr">. ${esc(st.map(s => s.label).join(', '))}</span>` : '';
-  return `<article class="pr row${S.sel === id ? ' sel' : ''}" data-id="${esc(id)}" data-key="${esc(k)}" data-ref="${esc(p.headRef || '')}">
-    <span class="c-new">${S.seen.has(k) ? '' : `<i class="new" role="img" aria-label="${t('new')}" title="${t('new')}"></i>`}</span>
+  return `<article class="pr row${S.sel === id ? ' sel' : ''}${depth ? ' kid' : ''}" data-id="${esc(id)}" data-key="${esc(k)}" data-ref="${esc(p.headRef || '')}"${depth ? ` style="--d:${Math.min(depth, 4)}"` : ''}>
+    <span class="c-new">${dot(p)}</span>
     ${sec.mine ? '<span class="c-av"></span>' : avatar(p.author, p.authorAvatar, {cls: 'c-av'})}
     <div class="body"${st.length ? '' : ' style="grid-column:span 2"'}>
       <a class="t" href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">${esc(p.title || t('noTitle'))}${summary}</a>
       <div class="meta"><span class="num">#${esc(p.number)}</span><span class="repo" title="${esc(p.repo)}">${esc(repoName(p))}</span>`
-      + `${sec.mine ? '' : `<span class="sep">·</span><span>${esc(p.author)}</span>`}${flags(p, sec)}</div>
+      + `${sec.mine ? '' : `<span class="sep">·</span><span>${esc(p.author)}</span>`}${flags(p, sec, depth)}</div>
     </div>
     ${st.length ? pill(st[0]) : ''}${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
   </article>`;
@@ -695,7 +719,7 @@ function render() {
     const head = `${ico('chev', 'chev')}<h2 id="h-${sec.id}">${sec.title}</h2><span class="n">${n}</span>${hint}`
       + `<button class="btn" type="button" data-copy-sec="${sec.id}" title="${t('copySecTip')}">${ico('copy')}${t('copy')}</button>`;
     return `<details class="sec" id="sec-${sec.id}" data-sec="${sec.id}" ${S.closed.has(sec.id) ? '' : 'open'}><summary class="sec-h">${head}</summary>`
-      + colsHead(sec) + prs.map(p => row(p, sec)).join('') + '</details>';
+      + colsHead(sec) + stackOrder(prs).map(([p, depth]) => row(p, sec, depth)).join('') + '</details>';
   }).join('');
   if (empty.length) html += `<p class="empties">${t(filtering ? 'noMatchIn' : 'nothingIn')} ${empty.join('<span aria-hidden="true"> · </span>')}</p>`;
 
@@ -919,8 +943,11 @@ function syncSeen(d) {
   // why: a snapshot flagged with error may be partial; pruning against it would re-mark PRs as new.
   // why: a hidden repo's PRs are absent, not gone; keep them seen so unhiding doesn't flag them as new.
   else if (!d.error) {
-    const hidden = new Set(arr(d.repos).filter(r => r.hidden).map(r => r.repo));
-    S.seen = new Set([...S.seen].filter(k => keys.includes(k) || hidden.has(k.slice(0, k.lastIndexOf('#')))));
+    const hidden = new Set(arr(d.repos).filter(r => r.hidden).map(r => r.repo)), live = new Set(keys);
+    const keep = k => live.has(k) || hidden.has(k.slice(0, k.lastIndexOf('#')));
+    S.seen = new Set([...S.seen].filter(keep));
+    S.opened = Object.fromEntries(Object.entries(S.opened).filter(([k]) => keep(k)));
+    store.set('opened', S.opened);
   }
   store.set('seen', [...S.seen]);
 }
@@ -1024,9 +1051,11 @@ async function toggleNotify() {
 }
 function markSeen(rowEl) {
   const k = rowEl?.dataset.key;
-  if (!k || S.seen.has(k)) return;
+  if (!k) return;
   S.seen.add(k);
+  S.opened[k] = Date.now();
   store.set('seen', [...S.seen]);
+  store.set('opened', S.opened);
   rowEl.querySelector('.new')?.remove();
 }
 function prOf(rowEl) {
@@ -1082,7 +1111,7 @@ document.addEventListener('keydown', e => {
   else if (k === 'y') { if (p) copy(p.md, t('asText', `${repoName(p)} #${p.number}`)); }
   else if (k === 'Y') copyAll();
   else if (k === 'c') { if (r) r.dataset.ref ? copy(shq(r.dataset.ref)) : toast(t('noBranch')); }
-  else if (k === 'g') { if (p) copy(`gh pr checkout ${p.number} -R ${p.repo}`); }
+  else if (k === 'g') { if (p) copy(checkoutCmd(p)); }
   else if (k === '/') { e.preventDefault(); $('#q').focus(); $('#q').select(); }
   else if (k === 'r') load(true);
   else if (k === 't') toggleTheme();
