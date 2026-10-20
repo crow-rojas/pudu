@@ -339,7 +339,7 @@ const T = {
     ownerAll: o => `All repos in ${o}`,
     s_review: 'Needs your review', s_returned: 'Needs your attention', s_approved: 'Approved', s_waiting: 'Waiting for review',
     s_draft: 'Drafts', s_merged: 'Merged this week', s_bots: 'Bots',
-    n_review: 'Review requested', n_returned: 'Your PR needs attention', n_approved: 'Your PR was approved',
+    n_review: 'Review requested', n_returned: 'Your PR needs attention', n_approved: 'Your PR was approved', n_rereview: 'New commits on a PR you reviewed',
     justNow: 'just now', now: 'now', noTitle: '(no title)', none: '(none)', of: (a, b) => `${a} of ${b}`,
     copy: 'Copy', copyAll: 'Copy all', copySecTip: 'Copy this section as text', copied: w => `Copied: ${w}`, copyFail: "Couldn't copy to the clipboard",
     asText: w => `${w} as text`, wholeInbox: 'the whole inbox as text', noBranch: 'This PR has no branch',
@@ -390,7 +390,7 @@ const T = {
     ownerAll: o => `Todos los repos de ${o}`,
     s_review: 'Necesitan tu review', s_returned: 'Necesitan tu atención', s_approved: 'Aprobados', s_waiting: 'Esperando review',
     s_draft: 'Drafts', s_merged: 'Mergeados esta semana', s_bots: 'Bots',
-    n_review: 'Te pidieron review', n_returned: 'Tu PR necesita atención', n_approved: 'Aprobaron tu PR',
+    n_review: 'Te pidieron review', n_returned: 'Tu PR necesita atención', n_approved: 'Aprobaron tu PR', n_rereview: 'Commits nuevos en un PR que revisaste',
     justNow: 'recién', now: 'ahora', noTitle: '(sin título)', none: '(ninguno)', of: (a, b) => `${a} de ${b}`,
     copy: 'Copiar', copyAll: 'Copiar todo', copySecTip: 'Copiar la sección como texto', copied: w => `Copiado: ${w}`, copyFail: 'No pude copiar al portapapeles',
     asText: w => `${w} como texto`, wholeInbox: 'toda la bandeja como texto', noBranch: 'Este PR no trae rama',
@@ -497,7 +497,6 @@ const SECTIONS = [
   {id: 'merged', when: 'merged', calm: true, gapBefore: true, mine: true, search: 'merged', get: d => d.merged},
   {id: 'bots', quiet: true, search: 'review', get: d => d.review?.bots},
 ].map(s => ({...s, title: t('s_' + s.id)}));
-const NOTIFY_ON = ['review', 'returned', 'approved'];
 
 const S = {
   data: null, netError: null, loading: false, lastLoad: 0,
@@ -578,6 +577,8 @@ function ci(p) {
   const failed = arr(p.failedChecks).filter(Boolean), tip = t('ci_' + p.checks);
   return status('c-ci', [...c, failed.length ? `${tip}: ${failed.join(', ')}` : tip], safeUrl(p.url) ? `${safeUrl(p.url)}/checks` : '');
 }
+const isRed = p => p.checks === 'FAILURE' || p.checks === 'ERROR';
+const isConflict = p => p.conflict || p.mergeState === 'DIRTY';
 // why: reviewDecision is null on repos without required reviews; latest reviews still say what happened.
 const decisionOf = p => p.decision || (arr(p.reviews).some(r => r?.state === 'CHANGES_REQUESTED') ? 'CHANGES_REQUESTED'
   : arr(p.reviews).some(r => r?.state === 'APPROVED') ? 'APPROVED' : null);
@@ -589,7 +590,7 @@ function decision(p) {
 }
 function mergeable(p, sec) {
   if (sec.calm) return '<span class="c-mrg"></span>';
-  if (p.conflict || p.mergeState === 'DIRTY') return status('c-mrg', ['alert', '--bad', t('conflictWith', p.baseRef)]);
+  if (isConflict(p)) return status('c-mrg', ['alert', '--bad', t('conflictWith', p.baseRef)]);
   if (p.mergeState === 'BEHIND') return status('c-mrg', ['behind', '--warn', t('behindOf', p.baseRef)]);
   if (['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].includes(p.mergeState)) return status('c-mrg', ['merge', '--ok', t('mergeable')]);
   return status('c-mrg', ['minus', '--faint', t('mergeUnknown')]);
@@ -599,8 +600,8 @@ function states(p, sec) {
   if (sec.calm) return [];
   const out = [], dec = decisionOf(p), failed = arr(p.failedChecks).filter(Boolean);
   const add = (tone, label, tip = label) => out.push({tone, label, tip});
-  if (p.conflict || p.mergeState === 'DIRTY') add('bad', t('conflict'), t('conflictWith', p.baseRef));
-  if (p.checks === 'FAILURE' || p.checks === 'ERROR') add('bad', failed.length ? t('ciFailedOn', failed[0]) : t('ci_' + p.checks), failed.length ? `${t('ci_' + p.checks)}: ${failed.join(', ')}` : undefined);
+  if (isConflict(p)) add('bad', t('conflict'), t('conflictWith', p.baseRef));
+  if (isRed(p)) add('bad', failed.length ? t('ciFailedOn', failed[0]) : t('ci_' + p.checks), failed.length ? `${t('ci_' + p.checks)}: ${failed.join(', ')}` : undefined);
   // why: new commits after your review are the actionable part, even when your own verdict was "changes".
   if (p.rereview) add('accent', t('rereview'), t('rereviewTip'));
   if (dec === 'CHANGES_REQUESTED') add('bad', t('changesReq'));
@@ -850,6 +851,7 @@ function renderChrome() {
   const me = $('#me');
   if (safeUrl(d?.avatarUrl) && me.getAttribute('src') !== d.avatarUrl) { me.src = d.avatarUrl; me.alt = d.login || ''; }
   for (const id of ['#repos-btn', '#copy-all']) $(id).hidden = !d;
+  paintBell();
   const b = $('#banner'), e = S.err;
   let msg = '';
   if (S.netError && d) msg = S.netRaw ? `${t('badReply')} <details><summary>${t('details')}</summary><code>${esc(S.netRaw)}</code></details>` : t('noServer', `<code>${esc(S.netError)}</code>`);
@@ -923,18 +925,30 @@ function setFavicon(n) {
 
 /* data */
 function notifyNew(prev, next) {
-  if (!prev || !S.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
-  for (const id of NOTIFY_ON) {
-    const title = t('n_' + id);
-    const get = SECTIONS.find(s => s.id === id).get;
-    const before = new Set(arr(get(prev)).map(keyOf));
-    for (const p of arr(get(next))) {
-      if (before.has(keyOf(p))) continue;
-      try {
-        const n = new Notification(title, {body: `${repoName(p)}#${p.number}  ${p.title || ''}`, icon: '/favicon.svg', tag: keyOf(p)});
-        n.onclick = () => { if (safeUrl(p.url)) window.open(p.url, '_blank', 'noopener'); n.close(); };
-      } catch {}
-    }
+  if (!prev || !bellOn()) return;
+  const fire = (title, p, why = '') => {
+    try {
+      const n = new Notification(title, {body: `${why ? why + '\n' : ''}${repoName(p)}#${p.number}  ${p.title || ''}`, icon: '/favicon.svg', tag: keyOf(p)});
+      n.onclick = () => { if (safeUrl(p.url)) window.open(p.url, '_blank', 'noopener'); n.close(); };
+    } catch {}
+  };
+  for (const id of ['review', 'approved']) {
+    const get = SECTIONS.find(s => s.id === id).get, before = new Set(arr(get(prev)).map(keyOf));
+    for (const p of arr(get(next))) if (!before.has(keyOf(p))) fire(t(p.rereview ? 'n_rereview' : 'n_' + id), p);
+  }
+  // why: your own PRs notify when they newly break, not whenever they move between sections.
+  const mine = d => SECTIONS.filter(s => s.mine && !s.calm).flatMap(s => arr(s.get(d)));
+  const before = new Map(mine(prev).map(p => [keyOf(p), p]));
+  for (const p of mine(next)) {
+    const o = before.get(keyOf(p)), failed = arr(p.failedChecks).filter(Boolean);
+    if (!o) continue;
+    const why = [
+      isRed(p) && !isRed(o) && (failed.length ? t('ciFailedOn', failed.join(', ')) : t('ci_' + p.checks)),
+      isConflict(p) && !isConflict(o) && t('conflictWith', p.baseRef),
+      decisionOf(p) === 'CHANGES_REQUESTED' && decisionOf(o) !== 'CHANGES_REQUESTED' && t('changesReq'),
+      Number(p.unresolvedThreads) > (Number(o.unresolvedThreads) || 0) && t('openThreads', Number(p.unresolvedThreads)),
+    ].filter(Boolean);
+    if (why.length) fire(t('n_returned'), p, why.join(' · '));
   }
 }
 function syncSeen(d) {
@@ -1026,10 +1040,15 @@ function paintTools() {
   $('#refresh').innerHTML = ico('refresh');
   $('#help-btn').innerHTML = ico('keyboard');
   $('#copy-all').innerHTML = `${ico('copy')}<span>${t('copyAll')}</span>`;
-  const nb = $('#notify');
-  nb.innerHTML = ico(S.notify ? 'bell' : 'bellOff');
-  nb.setAttribute('aria-pressed', String(S.notify));
-  const label = t(S.notify ? 'notifOn' : 'notifOff');
+  paintBell();
+}
+// why: the browser can revoke permission behind our back; the bell must never claim "on" then.
+const bellOn = () => S.notify && 'Notification' in window && Notification.permission === 'granted';
+function paintBell() {
+  const nb = $('#notify'), on = bellOn(), label = t(on ? 'notifOn' : 'notifOff');
+  if (nb.getAttribute('aria-pressed') === String(on) && nb.firstChild) return;
+  nb.innerHTML = ico(on ? 'bell' : 'bellOff');
+  nb.setAttribute('aria-pressed', String(on));
   nb.setAttribute('aria-label', label); nb.title = label;
 }
 function toggleTheme() {
@@ -1040,11 +1059,9 @@ function toggleTheme() {
 }
 async function toggleNotify() {
   if (!('Notification' in window)) return toast(t('notifUnsupported'));
-  if (!S.notify && Notification.permission !== 'granted') {
-    const perm = await Notification.requestPermission();
-    if (perm !== 'granted') return toast(t('notifBlocked'));
-  }
-  S.notify = !S.notify;
+  const on = bellOn();
+  if (!on && Notification.permission !== 'granted' && await Notification.requestPermission() !== 'granted') return toast(t('notifBlocked'));
+  S.notify = !on;
   store.set('notify', S.notify);
   paintTools();
   toast(t(S.notify ? 'notifyYes' : 'notifyNo'));
