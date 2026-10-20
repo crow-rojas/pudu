@@ -62,7 +62,22 @@ EMPTY = {
 # why: readers wait on a running fetch instead of starting their own; that wait is what dedupes gh calls.
 _lock = threading.Lock()
 _config_lock = threading.Lock()
-_cache = {"at": 0.0, "data": None, "error": None}
+_cache = {"at": 0.0, "data": None, "error": None, "errorKind": None}
+# why: the UI shows a fix per kind (install gh, gh auth login, wait, check the network) instead of raw stderr.
+ERROR_KINDS = [
+  ("gh_auth", ("gh auth login", "http 401", "authentication", "bad credentials")),
+  ("rate_limit", ("rate limit",)),
+  ("network", ("could not resolve", "timeout", "timed out", "connection", "network", "no such host", "dial tcp")),
+]
+
+
+def error_kind(e):
+  if isinstance(e, FileNotFoundError):
+    return "gh_missing"
+  if isinstance(e, subprocess.TimeoutExpired):
+    return "network"
+  s = str(e).lower()
+  return next((kind for kind, words in ERROR_KINDS if any(w in s for w in words)), "other")
 
 
 def gh(*args, partial=False):
@@ -335,11 +350,11 @@ def data(force=False):
     age = time.time() - _cache["at"]
     if (force and age >= FORCE_MIN_SECONDS) or age > CACHE_SECONDS:
       try:
-        _cache.update(data=fetch(), error=None)
+        _cache.update(data=fetch(), error=None, errorKind=None)
       except Exception as e:  # why: a network blip keeps showing the last good snapshot, flagged.
-        _cache.update(error=str(e))
+        _cache.update(error=str(e), errorKind=error_kind(e))
       _cache["at"] = time.time()
-    return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"]}, hidden_repos())
+    return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"], "errorKind": _cache["errorKind"]}, hidden_repos())
 
 
 MISSING_FRONTEND = "<!doctype html><meta charset=utf-8><title>Pudú</title><p>Falta el frontend: no existe index.html junto a server.py.".encode()
