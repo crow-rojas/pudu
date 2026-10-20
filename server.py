@@ -25,6 +25,7 @@ FORCE_MIN_SECONDS = 5
 MAX_BODY = 1_000_000
 # why: fixture data through the real pipeline, for screenshots and contributors without gh.
 DEMO = "--demo" in sys.argv[1:] or os.environ.get("PUDU_DEMO") == "1"
+STARTED = time.time()
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"}
 
 # why: GHE versions without merge queue reject the whole query; search() retries without this line.
@@ -420,7 +421,8 @@ def build(review_raw, mine_raw, merged_raw, rereview_raw=None, custom=()):
 
 
 def demo_raws():
-  now = datetime.datetime.now(datetime.timezone.utc)
+  # why: anchored to process start so a refetch doesn't bump every updatedAt and wake demo snoozes.
+  now = datetime.datetime.fromtimestamp(STARTED, datetime.timezone.utc)
   iso = lambda h: (now - datetime.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")
   me = "crow-demo"
   user = lambda login, kind="User": {"__typename": kind, "login": login, "avatarUrl": None}
@@ -671,7 +673,7 @@ def data(force=False, lang="en"):
       _cache["at"] = time.time()
     c = read_config()
     if DEMO:
-      c = {"snoozed": {"octo-labs/docs#212": {"until": iso_at(time.time() + 20 * 3600), "updatedAt": "9999"}}, **c}
+      c = {"snoozed": {"octo-labs/docs#212": {"until": iso_at(STARTED + 20 * 3600), "updatedAt": "9999"}}, **c}
     return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"], "errorKind": _cache["errorKind"]}, c, lang)
 
 
@@ -1201,6 +1203,7 @@ def selftest():
   assert by["acme/api#486"]["stackParent"] == 484 and by["acme/api#486"]["autoMerge"] and by["acme/api#484"]["mergeQueue"]["position"] == 2
   assert by["octo-labs/infra#77"]["requestedVia"] == "team:platform" and by["acme/web#1290"]["requestedVia"] == "direct"
   assert by["acme/api#488"]["requestedVia"] is None
+  assert demo_raws()[1]["search"]["nodes"] == demo_raws()[1]["search"]["nodes"]
   g["DEMO"] = True
   dd = data()
   g["DEMO"] = False
