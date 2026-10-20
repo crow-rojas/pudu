@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Pudú</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" id="favicon">
+<script>
+  // why: set the theme before first paint so a dark-mode user never sees a white flash.
+  try { const t = JSON.parse(localStorage.getItem('pudu.theme')); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+</script>
+<style>
+:root{
+  --bg:#F6F6F7; --surface:#FFFFFF; --surface-2:#F1F1F3; --ink:#18181B; --muted:#5F5F69; --faint:#93939C;
+  --line:#E4E4E7; --line-2:#EFEFF1;
+  --accent:#3E63DD; --accent-ink:#FFFFFF; --ok:#1F8A4C; --bad:#CD3B32; --warn:#A35F00; --merged:#7E4CC4;
+  --hover:color-mix(in srgb,var(--ink) 3.5%,transparent);
+  --sel:color-mix(in srgb,var(--accent) 8%,var(--surface));
+  --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cols:8px 22px minmax(0,1fr) 84px 44px 18px 18px 18px 88px 72px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#161618; --surface:#1C1C1F; --surface-2:#252529; --ink:#EDEDEF; --muted:#A1A1AA; --faint:#70707A;
+    --line:#2D2D32; --line-2:#252529;
+    --accent:#7B9BFF; --accent-ink:#0E1430; --ok:#46C37B; --bad:#F0716A; --warn:#E5A640; --merged:#B794F4;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#161618; --surface:#1C1C1F; --surface-2:#252529; --ink:#EDEDEF; --muted:#A1A1AA; --faint:#70707A;
+  --line:#2D2D32; --line-2:#252529;
+  --accent:#7B9BFF; --accent-ink:#0E1430; --ok:#46C37B; --bad:#F0716A; --warn:#E5A640; --merged:#B794F4;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{scroll-padding-top:60px}
+body{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.4 var(--font);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:-999px;top:8px;background:var(--surface);padding:8px 12px;border-radius:8px;z-index:50}
+.skip:focus{left:8px}
+.i{width:16px;height:16px;flex:none}
+kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px solid var(--line);border-bottom-width:2px;background:var(--surface);color:var(--muted)}
+
+/* header */
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:16px;height:48px;padding:0 16px;background:var(--bg);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:8px;text-decoration:none;flex:none;width:224px;font-weight:650;font-size:15px}
+.brand img{width:24px;height:24px;border-radius:6px}
+.loading .brand img{animation:spin 1.2s linear infinite}
+.search{position:relative;flex:1;max-width:460px}
+.search .i{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--faint);pointer-events:none;width:14px;height:14px}
+.search input{width:100%;height:30px;padding:0 36px 0 30px;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit}
+.search input::placeholder{color:var(--faint)}
+.search input:focus{outline:none;border-color:var(--accent)}
+.search kbd{position:absolute;right:8px;top:50%;transform:translateY(-50%)}
+.search input:focus + kbd,.search input:not(:placeholder-shown) + kbd{display:none}
+.tools{display:flex;align-items:center;gap:2px;margin-left:auto}
+.ib{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:7px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.ib:hover{background:var(--hover);color:var(--ink)}
+.ib[aria-pressed="true"]{color:var(--accent)}
+.loading #refresh .i{animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:12.5px;font-weight:550;color:var(--muted);white-space:nowrap}
+.btn:hover{color:var(--ink);border-color:var(--faint)}
+.btn .i{width:14px;height:14px}
+.me{width:26px;height:26px;border-radius:50%;margin-left:6px;background:var(--surface-2)}
+.me:not([src]){display:none}
+
+/* shell */
+.shell{display:grid;grid-template-columns:224px minmax(0,1fr);gap:16px;padding:12px 16px 32px}
+.side{position:sticky;top:60px;align-self:start}
+.nav{list-style:none;margin:0;padding:0;display:grid;gap:1px}
+.nav a{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:7px;text-decoration:none;color:var(--muted)}
+.nav a:hover{background:var(--hover);color:var(--ink)}
+.nav a span{flex:1}
+.nav a b{font-weight:550;font-size:12px;font-variant-numeric:tabular-nums;color:var(--faint)}
+.nav a.hot{color:var(--ink)}
+.nav a.hot b{min-width:20px;text-align:center;padding:2px 6px;border-radius:999px;background:var(--accent);color:var(--accent-ink)}
+.nav .gap{height:1px;margin:6px 10px;background:var(--line)}
+
+/* chips + banner */
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 10px}
+.chips:empty{display:none}
+.chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:12px;color:var(--muted)}
+.chip:hover{color:var(--ink)}
+.chip b{font-weight:500;color:var(--faint);font-variant-numeric:tabular-nums}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.chip[aria-pressed="true"] b{color:inherit;opacity:.7}
+.banner{display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;padding:8px 12px;border-radius:8px;font-size:13px;
+  background:color-mix(in srgb,var(--warn) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 30%,transparent)}
+.banner[hidden]{display:none}
+.banner .i{color:var(--warn)}
+.banner code{font:12px var(--mono);word-break:break-word}
+
+/* sections */
+.sec{margin:0 0 10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sec-h{display:flex;align-items:center;gap:8px;height:42px;padding:0 10px 0 12px;list-style:none;cursor:pointer;user-select:none}
+.sec-h::-webkit-details-marker{display:none}
+.sec-h h2{margin:0;font-size:14px;font-weight:600}
+.sec-h .n{color:var(--faint);font-variant-numeric:tabular-nums}
+.sec-h .hint{color:var(--faint);font-size:12px;margin-left:4px}
+.sec-h .btn{margin-left:auto}
+.chev{color:var(--faint);transition:transform .15s;width:14px;height:14px}
+details.sec[open] .chev{transform:rotate(90deg)}
+div.sec .sec-h{cursor:default}
+div.sec .chev{visibility:hidden}
+
+/* table */
+.row{display:grid;grid-template-columns:var(--cols);gap:12px;align-items:center;padding:0 14px 0 10px}
+.cols{height:30px;border-top:1px solid var(--line);color:var(--faint);font-size:12px}
+.cols .i{width:14px;height:14px}
+.cols .r{text-align:right}
+.pr{position:relative;min-height:48px;border-top:1px solid var(--line-2);scroll-margin:60px 0 16px}
+.pr:hover{background:var(--hover)}
+.pr.sel{background:var(--sel);box-shadow:inset 2px 0 0 var(--accent)}
+.pr:has(.t:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+.z{position:relative;z-index:1}
+.new{display:block;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.av{position:relative;flex:none;width:22px;height:22px}
+.av img,.av .ini{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);object-fit:cover}
+.av .ini{font:650 10px/1 var(--font);color:var(--muted);text-transform:uppercase}
+.body{min-width:0;padding:6px 0}
+.t{display:block;font-weight:500;font-size:14px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t:focus-visible{outline:none}
+.t::after{content:"";position:absolute;inset:0}
+.t:hover{text-decoration:underline;text-decoration-color:var(--faint);text-underline-offset:3px}
+.meta{display:flex;align-items:center;gap:6px;margin-top:1px;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden}
+.meta .sep{color:var(--faint)}
+.tag{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border-radius:5px;font-size:11.5px;background:var(--surface-2);color:var(--muted);flex:none}
+.tag .i{width:12px;height:12px}
+.tag code{font:11px var(--mono);max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.lbl i{width:7px;height:7px;border-radius:50%;background:var(--lc,var(--faint))}
+.people{display:flex;justify-content:flex-end;padding-left:6px}
+.people .av{margin-left:-6px}
+.people .av img,.people .av .ini{border:2px solid var(--surface)}
+.pr:hover .people .av img,.pr:hover .people .av .ini{border-color:color-mix(in srgb,var(--ink) 3.5%,var(--surface))}
+.pr.sel .people .av img,.pr.sel .people .av .ini{border-color:var(--sel)}
+.av.team .ini{border-radius:6px}
+.av.pend img,.av.pend .ini{opacity:.5}
+.av s{position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;border-radius:50%;display:grid;place-items:center;background:var(--c);color:var(--surface);border:1.5px solid var(--surface);text-decoration:none}
+.av s .i{width:7px;height:7px;stroke-width:4}
+.more{font-size:11px;color:var(--faint);margin-left:4px;align-self:center}
+.thr{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.thr .i{width:13px;height:13px}
+.thr.open{color:var(--warn)}
+.st{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--c);color:var(--surface);text-decoration:none}
+.st .i{width:11px;height:11px;stroke-width:3.2}
+.dash{display:block;width:8px;height:1.5px;margin:auto;background:var(--faint);border-radius:1px}
+.size{text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.add{color:var(--ok)}.del{color:var(--bad);margin-left:5px}
+.when{text-align:right;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.when.w1{color:var(--warn)}.when.w2{color:var(--bad);font-weight:600}
+.empty{padding:12px 16px;border-top:1px solid var(--line);color:var(--muted)}
+.sk{height:48px;border-top:1px solid var(--line-2);background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:shimmer 1.4s infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+
+/* footer, dialog, toast */
+.foot{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;padding:12px 16px 24px;color:var(--faint);font-size:12px;border-top:1px solid var(--line)}
+.foot .warn-t{color:var(--warn)}
+.foot code{font:11.5px var(--mono)}
+.foot button{border:0;background:none;padding:0;cursor:pointer;color:var(--muted);margin-left:auto;font-size:12px}
+.foot button:hover{color:var(--ink)}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);padding:20px 22px;width:min(440px,calc(100vw - 32px));box-shadow:0 30px 80px -20px rgba(0,0,0,.4)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog h2{margin:0 0 12px;font-size:16px;display:flex;align-items:center;gap:8px}
+dialog h2 img{width:22px;height:22px;border-radius:6px}
+dialog dl{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;margin:0;align-items:center}
+dialog dt{display:flex;gap:4px;justify-content:flex-end}
+dialog dd{margin:0;color:var(--muted)}
+dialog form{margin-top:16px;text-align:right}
+.toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,16px);opacity:0;pointer-events:none;background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:8px;font-size:13px;transition:.2s ease;z-index:60;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast code{font:12px var(--mono)}
+
+/* responsive */
+@media (max-width:1100px){
+  :root{--cols:8px 22px minmax(0,1fr) 18px 18px 18px 80px 72px}
+  .c-people,.c-thr{display:none!important}
+}
+@media (max-width:800px){
+  :root{--cols:8px 22px minmax(0,1fr) 18px 72px}
+  .c-dec,.c-mrg,.c-size{display:none!important}
+  .top{gap:10px}
+  .brand{width:auto}.brand span{display:none}
+  .search kbd,#copy-all span{display:none}
+  .shell{grid-template-columns:minmax(0,1fr);padding:8px 10px 24px}
+  .side{position:static;overflow-x:auto;scrollbar-width:none}
+  .nav{display:flex;width:max-content}
+  .nav .gap{display:none}
+  .sec-h .hint{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<header class="top">
+  <a class="brand" href="/" aria-label="Pudú, inicio"><img src="/favicon.svg" alt="" width="24" height="24"><span>Pudú</span></a>
+  <label class="search">
+    <span class="sr">Filtrar PRs</span>
+    <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="Filtrar PRs" title="Busca en título, repo, autor, número, rama y labels" autocomplete="off" spellcheck="false">
+    <kbd>/</kbd>
+  </label>
+  <div class="tools">
+    <button class="btn" id="copy-all" type="button" title="Copiar todo lo visible como texto (Y)"></button>
+    <button class="ib" id="refresh" type="button" aria-label="Refrescar ahora (r)" title="Refrescar ahora (r)"></button>
+    <button class="ib" id="notify" type="button" aria-pressed="false"></button>
+    <button class="ib" id="theme" type="button" aria-label="Cambiar tema (t)" title="Cambiar tema (t)"></button>
+    <button class="ib" id="help-btn" type="button" aria-label="Atajos de teclado (?)" title="Atajos de teclado (?)"></button>
+    <img class="me" id="me" alt="" width="26" height="26" referrerpolicy="no-referrer">
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="side" aria-label="Secciones"><ul class="nav" id="nav"></ul></nav>
+  <main id="main">
+    <div id="banner" class="banner" role="status" hidden></div>
+    <div class="chips" id="chips" role="group" aria-label="Filtrar por repositorio"></div>
+    <div id="app" aria-busy="true">
+      <div class="sec" aria-hidden="true"><div class="sec-h"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+    </div>
+  </main>
+</div>
+
+<footer class="foot">
+  <span id="fresh">Conectando con GitHub…</span>
+  <span id="rate"></span>
+  <span>Para Claude: <code>curl -s localhost:8765/inbox.md</code></span>
+  <button type="button" id="help-link">Atajos de teclado <kbd>?</kbd></button>
+</footer>
+
+<dialog id="help" aria-labelledby="help-title">
+  <h2 id="help-title"><img src="/favicon.svg" alt="">Atajos</h2>
+  <dl>
+    <dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Bajar y subir entre PRs</dd>
+    <dt><kbd>o</kbd><kbd>Enter</kbd></dt><dd>Abrir el PR en GitHub</dd>
+    <dt><kbd>y</kbd></dt><dd>Copiar el PR como texto</dd>
+    <dt><kbd>Y</kbd></dt><dd>Copiar todo lo visible como texto</dd>
+    <dt><kbd>c</kbd></dt><dd>Copiar la rama del PR</dd>
+    <dt><kbd>g</kbd></dt><dd>Copiar <code>gh pr checkout</code></dd>
+    <dt><kbd>/</kbd></dt><dd>Filtrar</dd>
+    <dt><kbd>r</kbd></dt><dd>Refrescar sin caché</dd>
+    <dt><kbd>t</kbd></dt><dd>Cambiar entre claro y oscuro</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Limpiar filtro o cerrar</dd>
+    <dt><kbd>?</kbd></dt><dd>Mostrar esta ayuda</dd>
+  </dl>
+  <form method="dialog"><button class="btn" autofocus>Listo</button></form>
+</dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+'use strict';
+const REFRESH_MS = 60_000;
+const FOCUS_MIN_GAP_MS = 15_000;
+const $ = s => document.querySelector(s);
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('pudu.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('pudu.' + k, JSON.stringify(v)); } catch {} },
+  has(k) { try { return localStorage.getItem('pudu.' + k) !== null; } catch { return false; } },
+};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const safeUrl = u => (typeof u === 'string' && /^https:\/\//i.test(u)) ? esc(u) : '';
+const arr = a => Array.isArray(a) ? a : [];
+const keyOf = p => `${p.repo}#${p.number}`;
+const repoName = p => p.name || String(p.repo || '').split('/').pop() || '?';
+const num = new Intl.NumberFormat('es');
+const rtf = new Intl.RelativeTimeFormat('es', {numeric: 'auto', style: 'short'});
+const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+const P = {
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  dot: '<circle cx="12" cy="12" r="3" fill="currentColor"/>',
+  comment: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/>',
+  ci: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  stack: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
+  bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+  bellOff: '<path d="M6 8a6 6 0 0 1 9.3-5M18 8c0 7 3 9 3 9H9M6 8c0 7-3 9-3 9h2"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path d="m3 3 18 18"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>',
+  keyboard: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
+  merge: '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 7.5v9M6 7.5c0 4 4 4.5 9.5 4.5"/>',
+  draft: '<circle cx="12" cy="12" r="8" stroke-dasharray="3.2 3.2"/>',
+  alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  chev: '<path d="m9 6 6 6-6 6"/>',
+  behind: '<path d="M12 4v12M6 10l6 6 6-6"/>',
+};
+const ico = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
+
+// why: titles must match MD_SECTIONS in server.py so a copied section reads the same as /inbox.md.
+const SECTIONS = [
+  {id: 'review', title: 'Necesitan tu review', urgent: true, when: 'wait', get: d => d.review?.humans},
+  {id: 'returned', title: 'Te devolvieron cambios', urgent: true, get: d => d.mine?.returned},
+  {id: 'approved', title: 'Aprobados', get: d => d.mine?.approved},
+  {id: 'waiting', title: 'Esperando review', get: d => d.mine?.waiting},
+  {id: 'draft', title: 'Drafts', get: d => d.mine?.draft},
+  {id: 'merged', title: 'Mergeados esta semana', when: 'merged', gapBefore: true, get: d => d.merged},
+  {id: 'bots', title: 'Bots', get: d => d.review?.bots},
+];
+const WHEN_LABEL = {wait: 'Espera', merged: 'Mergeado'};
+const NOTIFY_ON = [
+  ['review', 'Te pidieron review'],
+  ['returned', 'Te devolvieron cambios'],
+  ['approved', 'Aprobaron tu PR'],
+];
+
+const S = {
+  data: null, netError: null, loading: false, lastLoad: 0,
+  q: '', repos: new Set(arr(store.get('repos', []))),
+  seen: new Set(arr(store.get('seen', []))), seenSeeded: store.has('seen'),
+  notify: store.get('notify', false) === true,
+  closed: new Set(arr(store.get('closed', ['bots']))),
+  sel: null, retryTimer: null, visible: {}, cached: false,
+};
+
+/* time */
+function ago(iso) {
+  const t = Date.parse(iso);
+  if (!t) return '';
+  const s = (t - Date.now()) / 1000, a = Math.abs(s);
+  if (a < 45) return 'recién';
+  if (a < 3600) return rtf.format(Math.round(s / 60), 'minute');
+  if (a < 86400) return rtf.format(Math.round(s / 3600), 'hour');
+  return rtf.format(Math.round(s / 86400), 'day');
+}
+function short(iso) {
+  const m = (Date.now() - Date.parse(iso)) / 6e4;
+  if (!(m >= 0)) return ['', 0];
+  const h = m / 60, urgency = h < 24 ? 0 : h < 72 ? 1 : 2;
+  if (m < 1) return ['ahora', 0];
+  if (m < 60) return [`${Math.floor(m)}m`, 0];
+  if (h < 24) return [`${Math.floor(h)}h`, 0];
+  if (h < 24 * 60) return [`${Math.floor(h / 24)}d`, urgency];
+  return [`${Math.floor(h / 24 / 30)}mes`, urgency];
+}
+const fullDate = iso => { const t = Date.parse(iso); return t ? new Date(t).toLocaleString('es', {dateStyle: 'medium', timeStyle: 'short'}) : ''; };
+
+/* cells */
+function avatar(login, src, {cls = '', state, title} = {}) {
+  const isTeam = String(login).startsWith('team:');
+  const name = isTeam ? String(login).slice(5) : String(login ?? '?');
+  const img = safeUrl(src)
+    ? `<img src="${safeUrl(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" width="22" height="22">`
+    : `<span class="ini">${esc(name.slice(0, isTeam ? 2 : 1))}</span>`;
+  const badge = state ? `<s style="--c:var(${state[1]})">${ico(state[0])}</s>` : '';
+  return `<span class="av ${cls} ${isTeam ? 'team' : ''}" title="${esc(title || login)}">${img}${badge}</span>`;
+}
+const REVIEW_STATE = {
+  APPROVED: ['check', '--ok', 'aprobó'],
+  CHANGES_REQUESTED: ['x', '--bad', 'pidió cambios'],
+  COMMENTED: ['comment', '--muted', 'comentó'],
+  DISMISSED: ['x', '--faint', 'review descartada'],
+};
+function people(p) {
+  const seen = new Set();
+  const done = arr(p.reviews).filter(r => r && r.login && !seen.has(r.login) && seen.add(r.login));
+  const pend = arr(p.pending).filter(r => r && r.login && !seen.has(r.login));
+  const all = [
+    ...done.map(r => { const st = REVIEW_STATE[r.state] || REVIEW_STATE.COMMENTED; return avatar(r.login, r.avatar, {state: st, title: `${r.login} ${st[2]}`}); }),
+    ...pend.map(r => avatar(r.login, r.avatar, {cls: 'pend', title: `Falta ${r.login === S.data?.login ? 'tu review' : 'la review de ' + r.login}`})),
+  ];
+  const extra = all.length > 3 ? `<span class="more">+${all.length - 3}</span>` : '';
+  return `<span class="people c-people z">${all.slice(0, 3).join('')}${extra}</span>`;
+}
+function threads(p) {
+  const total = Number(p.threads), open = Number(p.unresolvedThreads) || 0;
+  if (!(total > 0)) return '<span class="c-thr"></span>';
+  const tip = open ? `${open} de ${total} hilos sin resolver` : `${total} hilos, todos resueltos`;
+  return `<span class="thr c-thr z ${open ? 'open' : ''}" title="${esc(tip)}">${ico('comment')}${total - open}/${total}</span>`;
+}
+const dash = cls => `<span class="${cls}"><i class="dash"></i></span>`;
+const status = (cls, [icon, color, tip], href = '') => href
+  ? `<a class="st ${cls} z" style="--c:var(${color})" href="${href}" target="_blank" rel="noopener" title="${esc(tip)}" aria-label="${esc(tip)}">${ico(icon)}</a>`
+  : `<span class="st ${cls} z" style="--c:var(${color})" title="${esc(tip)}" aria-label="${esc(tip)}">${ico(icon)}</span>`;
+const CI = {
+  SUCCESS: ['check', '--ok', 'CI en verde'],
+  FAILURE: ['x', '--bad', 'CI falló'],
+  ERROR: ['x', '--bad', 'CI con error'],
+  PENDING: ['dot', '--warn', 'CI corriendo'],
+  EXPECTED: ['dot', '--warn', 'CI por partir'],
+};
+function ci(p) {
+  const c = CI[p.checks];
+  if (!c) return dash('c-ci');
+  const failed = arr(p.failedChecks).filter(Boolean);
+  return status('c-ci', [c[0], c[1], failed.length ? `${c[2]}: ${failed.join(', ')}` : c[2]], safeUrl(p.url) ? `${safeUrl(p.url)}/checks` : '');
+}
+const DECISION = {APPROVED: ['check', '--ok', 'Aprobado'], CHANGES_REQUESTED: ['x', '--bad', 'Cambios pedidos']};
+const decision = p => DECISION[p.decision] ? status('c-dec', DECISION[p.decision]) : `<span class="c-dec" title="${p.decision === 'REVIEW_REQUIRED' ? 'Falta review' : 'Sin review'}"><i class="dash"></i></span>`;
+function mergeable(p, sec) {
+  if (sec.id === 'merged') return status('c-mrg', ['merge', '--merged', 'Mergeado']);
+  if (p.conflict || p.mergeState === 'DIRTY') return status('c-mrg', ['alert', '--bad', `Conflicto con ${p.baseRef || 'la base'}`]);
+  if (p.mergeState === 'BEHIND') return status('c-mrg', ['behind', '--warn', `Atrás de ${p.baseRef || 'la base'}`]);
+  if (['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].includes(p.mergeState)) return status('c-mrg', ['merge', '--ok', 'Se puede mergear']);
+  return dash('c-mrg');
+}
+function size(p) {
+  const a = Number(p.additions), d = Number(p.deletions);
+  if (p.additions == null || !Number.isFinite(a)) return '<span class="size c-size"></span>';
+  const files = Number.isFinite(Number(p.changedFiles)) && p.changedFiles != null ? ` en ${num.format(p.changedFiles)} archivos` : '';
+  return `<span class="size c-size z" title="${esc(num.format(a + (d || 0)) + ' líneas' + files)}">`
+    + `${a ? `<span class="add">+${num.format(a)}</span>` : ''}${d ? `<span class="del">-${num.format(d)}</span>` : ''}</span>`;
+}
+function when(p, sec) {
+  const [iso, label] = sec.when === 'wait' ? [p.requestedAt || p.createdAt, 'Te pidieron review']
+    : sec.when === 'merged' ? [p.mergedAt, 'Mergeado'] : [p.updatedAt, 'Actualizado'];
+  return Date.parse(iso) ? `<time class="when c-time z" data-t="${esc(iso)}" data-urgent="${sec.when === 'wait' ? 1 : ''}" datetime="${esc(iso)}" title="${esc(label + ' ' + fullDate(iso))}"></time>` : '<span class="c-time"></span>';
+}
+function flags(p, sec) {
+  const out = [];
+  if (p.draft && sec.id !== 'draft') out.push(`<span class="tag">${ico('draft')}Draft</span>`);
+  if (p.stacked && p.baseRef) out.push(`<span class="tag z" title="Apilado sobre ${esc(p.baseRef)}">${ico('stack')}<code>${esc(p.baseRef)}</code></span>`);
+  const ls = arr(p.labels).filter(l => l && l.name);
+  for (const l of ls.slice(0, 2)) {
+    const c = /^[0-9a-f]{6}$/i.test(l.color || '') ? `style="--lc:#${l.color}"` : '';
+    out.push(`<span class="tag lbl"><i ${c}></i>${esc(l.name)}</span>`);
+  }
+  if (ls.length > 2) out.push(`<span class="tag z" title="${esc(ls.slice(2).map(l => l.name).join(', '))}">+${ls.length - 2}</span>`);
+  return out.join('');
+}
+function row(p, sec) {
+  const k = keyOf(p), id = `${sec.id}|${k}`;
+  return `<article class="pr row${S.sel === id ? ' sel' : ''}" data-id="${esc(id)}" data-key="${esc(k)}" data-ref="${esc(p.headRef || '')}">
+    <span>${S.seen.has(k) ? '' : '<i class="new" title="Nuevo"></i>'}</span>
+    ${avatar(p.author, p.authorAvatar)}
+    <div class="body">
+      <a class="t" href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">${esc(p.title || '(sin título)')}</a>
+      <div class="meta"><span>${esc(p.author)}</span><span class="sep">·</span><span title="${esc(p.repo)}">${esc(repoName(p))} #${esc(p.number)}</span>${flags(p, sec)}</div>
+    </div>
+    ${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
+  </article>`;
+}
+const colsHead = sec => `<div class="row cols" aria-hidden="true"><span></span><span></span><span>Título</span>
+  <span class="c-people r">Reviewers</span><span class="c-thr" title="Hilos resueltos / total">${ico('comment')}</span>
+  <span class="c-ci" title="CI">${ico('ci')}</span><span class="c-dec" title="Review">${ico('eye')}</span><span class="c-mrg" title="Mergeable">${ico('merge')}</span>
+  <span class="c-size r">Cambios</span><span class="c-time r">${WHEN_LABEL[sec.when] || 'Actualizado'}</span></div>`;
+
+/* text for Claude */
+function sectionText(sec) {
+  const v = S.visible[sec.id] || {prs: [], total: 0};
+  const n = v.prs.length === v.total ? `${v.total}` : `${v.prs.length} de ${v.total}`;
+  return `## ${sec.title} (${n})\n\n` + (v.prs.map(p => p.md || `- ${p.title} ${p.url}`).join('\n') || '(ninguno)');
+}
+function filterNote() {
+  const bits = [];
+  if (S.q) bits.push(`texto "${S.q}"`);
+  if (S.reposActive?.size) bits.push(`repos ${[...S.reposActive].join(', ')}`);
+  return bits.length ? `\n\nFiltrado por ${bits.join(' y ')}.` : '';
+}
+const allText = () => [`# PRs de @${S.data?.login}${filterNote()}`, ...SECTIONS.map(sectionText)].join('\n\n') + '\n';
+
+/* filters */
+function matches(p) {
+  if (S.reposActive.size && !S.reposActive.has(p.repo)) return false;
+  if (!S.q) return true;
+  const hay = norm([p.title, p.repo, p.author, '#' + p.number, p.number, p.headRef, p.baseRef, ...arr(p.labels).map(l => l?.name)].join(' '));
+  return norm(S.q).split(/\s+/).filter(Boolean).every(w => hay.includes(w));
+}
+
+/* render */
+function render() {
+  const d = S.data;
+  const repos = new Map();
+  for (const p of SECTIONS.flatMap(s => arr(s.get(d)))) if (p?.repo) repos.set(p.repo, (repos.get(p.repo) || 0) + 1);
+  S.reposActive = new Set([...S.repos].filter(r => repos.has(r)));
+  const filtering = !!S.q || S.reposActive.size > 0;
+
+  const html = SECTIONS.map(sec => {
+    const all = arr(sec.get(d)).filter(Boolean), prs = all.filter(matches);
+    S.visible[sec.id] = {prs, total: all.length};
+    const n = filtering && all.length !== prs.length ? `${prs.length} de ${all.length}` : `${prs.length}`;
+    const copyBtn = prs.length ? `<button class="btn" type="button" data-copy-sec="${sec.id}" title="Copiar la sección como texto">${ico('copy')}Copiar</button>` : '';
+    const head = `${ico('chev', 'chev')}<h2 id="h-${sec.id}">${sec.title}</h2><span class="n">${n}</span>${copyBtn}`;
+    if (!prs.length) {
+      const msg = filtering && all.length ? '<div class="empty">Ningún PR coincide con el filtro.</div>' : '';
+      return `<div class="sec" id="sec-${sec.id}"><div class="sec-h">${head}</div>${msg}</div>`;
+    }
+    return `<details class="sec" id="sec-${sec.id}" data-sec="${sec.id}" ${S.closed.has(sec.id) ? '' : 'open'}><summary class="sec-h">${head}</summary>`
+      + colsHead(sec) + prs.map(p => row(p, sec)).join('') + '</details>';
+  }).join('');
+
+  const hadFocus = document.activeElement?.closest?.('.pr');
+  const app = $('#app');
+  app.innerHTML = html;
+  app.setAttribute('aria-busy', 'false');
+  if (hadFocus && S.sel) $(`.pr[data-id="${CSS.escape(S.sel)}"] .t`)?.focus({preventScroll: true});
+
+  $('#nav').innerHTML = SECTIONS.map(sec => {
+    const n = S.visible[sec.id].prs.length;
+    return `${sec.gapBefore ? '<li class="gap" aria-hidden="true"></li>' : ''}<li><a href="#sec-${sec.id}" class="${n && sec.urgent ? 'hot' : ''}" data-sec="${sec.id}"><span>${sec.title}</span><b>${n}</b></a></li>`;
+  }).join('');
+
+  $('#chips').innerHTML = repos.size > 1 || S.reposActive.size
+    ? `<button class="chip" type="button" data-repo="" aria-pressed="${S.reposActive.size === 0}">Todos</button>` + [...repos].sort().map(([r, n]) =>
+      `<button class="chip" type="button" data-repo="${esc(r)}" aria-pressed="${S.reposActive.has(r)}" title="${esc(r)}">${esc(r.split('/').pop())}<b>${n}</b></button>`).join('')
+    : '';
+
+  renderChrome();
+  tick();
+}
+
+function renderChrome() {
+  const d = S.data;
+  const urgent = arr(d?.review?.humans).length + arr(d?.mine?.returned).length;
+  document.title = urgent ? `(${urgent}) Pudú` : 'Pudú';
+  setFavicon(urgent);
+  const me = $('#me');
+  if (safeUrl(d?.avatarUrl) && me.getAttribute('src') !== d.avatarUrl) { me.src = d.avatarUrl; me.alt = d.login || ''; }
+  const b = $('#banner');
+  let msg = '';
+  if (S.netError) msg = `No hay conexión con el server local (<code>${esc(S.netError)}</code>). Sigo intentando cada minuto.`;
+  else if (d?.error && d?.login) msg = `GitHub no respondió en el último refresco (<code>${esc(d.error)}</code>). Lo que ves es de las ${esc(new Date(d.fetchedAt * 1000).toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}))}.`;
+  b.hidden = !msg;
+  if (msg) b.innerHTML = `${ico('alert')}<span>${msg}</span>`;
+  const rl = d?.rateLimit;
+  if (rl && Number.isFinite(Number(rl.remaining))) {
+    const reset = Date.parse(rl.resetAt) ? `, se renueva a las ${new Date(rl.resetAt).toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'})}` : '';
+    $('#rate').innerHTML = `<span class="${Number(rl.remaining) < 500 ? 'warn-t' : ''}">${esc(num.format(rl.remaining))} puntos de API${esc(reset)}</span>`;
+  } else $('#rate').textContent = '';
+}
+
+function renderNoData(message) {
+  $('#app').setAttribute('aria-busy', 'false');
+  $('#app').innerHTML = `<div class="sec"><div class="sec-h"><h2>Todavía no hay datos</h2>`
+    + `<span class="hint">${message ? esc(message) : 'El server está consultando GitHub.'}</span>`
+    + `<button class="btn" type="button" data-action="retry">${ico('refresh')}Reintentar</button></div></div>`;
+  $('#fresh').textContent = 'Sin datos todavía';
+}
+
+/* live bits */
+function tick() {
+  for (const el of document.querySelectorAll('[data-t]')) {
+    const [text, urgency] = short(el.dataset.t);
+    el.textContent = text;
+    el.className = `when c-time z${el.dataset.urgent && urgency ? ' w' + urgency : ''}`;
+  }
+  if (S.data?.fetchedAt) {
+    const iso = new Date(S.data.fetchedAt * 1000).toISOString();
+    $('#fresh').textContent = `Datos de GitHub ${ago(iso)}`;
+    $('#fresh').title = fullDate(iso);
+  }
+}
+
+let baseIcon = null;
+const iconImg = new Image();
+iconImg.onload = () => { baseIcon = iconImg; renderChrome(); };
+iconImg.src = '/favicon.svg';
+function setFavicon(n) {
+  const link = $('#favicon');
+  if (!baseIcon || !n) { if (link.getAttribute('href') !== '/favicon.svg') link.href = '/favicon.svg'; return; }
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d');
+  x.drawImage(baseIcon, 0, 0, 64, 64);
+  const label = n > 9 ? '9+' : String(n);
+  x.beginPath(); x.arc(41, 23, 23, 0, Math.PI * 2); x.fillStyle = '#fff'; x.fill();
+  x.beginPath(); x.arc(41, 23, 19.5, 0, Math.PI * 2); x.fillStyle = '#D42F3B'; x.fill();
+  x.fillStyle = '#fff'; x.font = `800 ${label.length > 1 ? 24 : 30}px system-ui, sans-serif`;
+  x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(label, 41, 25);
+  link.href = c.toDataURL('image/png');
+}
+
+/* data */
+function notifyNew(prev, next) {
+  if (!prev || !S.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
+  for (const [id, title] of NOTIFY_ON) {
+    const get = SECTIONS.find(s => s.id === id).get;
+    const before = new Set(arr(get(prev)).map(keyOf));
+    for (const p of arr(get(next))) {
+      if (before.has(keyOf(p))) continue;
+      try {
+        const n = new Notification(title, {body: `${repoName(p)}#${p.number}  ${p.title || ''}`, icon: '/favicon.svg', tag: keyOf(p)});
+        n.onclick = () => { if (safeUrl(p.url)) window.open(p.url, '_blank', 'noopener'); n.close(); };
+      } catch {}
+    }
+  }
+}
+function syncSeen(d) {
+  const keys = SECTIONS.flatMap(s => arr(s.get(d))).filter(Boolean).map(keyOf);
+  if (!S.seenSeeded) { keys.forEach(k => S.seen.add(k)); S.seenSeeded = true; }
+  // why: a snapshot flagged with error may be partial; pruning against it would re-mark PRs as new.
+  else if (!d.error) S.seen = new Set(keys.filter(k => S.seen.has(k)));
+  store.set('seen', [...S.seen]);
+}
+async function load(force = false) {
+  if (S.loading) return;
+  S.loading = true;
+  document.body.classList.add('loading');
+  clearTimeout(S.retryTimer);
+  try {
+    const r = await fetch('/api/data' + (force ? '?force=1' : ''), {cache: 'no-store'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    S.netError = null;
+    if (!d || !d.login) {
+      if (!S.data) renderNoData(d?.error);
+      S.retryTimer = setTimeout(load, 5000);
+      return;
+    }
+    // why: a snapshot from the last visit is not a previous poll; diffing against it would notify on every F5.
+    if (S.data && !S.cached && S.data.fetchedAt !== d.fetchedAt) notifyNew(S.data, d);
+    syncSeen(d);
+    S.data = d;
+    S.cached = false;
+    store.set('snap', d);
+    render();
+    if (force) toast('Al día');
+  } catch (e) {
+    S.netError = e.message || 'error de red';
+    if (S.data) renderChrome(); else renderNoData(S.netError);
+  } finally {
+    S.loading = false;
+    S.lastLoad = Date.now();
+    document.body.classList.remove('loading');
+  }
+}
+
+/* ui helpers */
+let toastTimer;
+function toast(html) {
+  const t = $('#toast');
+  t.innerHTML = html;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), 1800);
+}
+async function copy(text, what) {
+  try { await navigator.clipboard.writeText(text); toast(`Copiado: ${what ? esc(what) : `<code>${esc(text)}</code>`}`); }
+  catch { toast('No pude copiar al portapapeles'); }
+}
+function effectiveTheme() {
+  return document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+}
+function paintTools() {
+  $('#theme').innerHTML = ico(effectiveTheme() === 'dark' ? 'sun' : 'moon');
+  $('#refresh').innerHTML = ico('refresh');
+  $('#help-btn').innerHTML = ico('keyboard');
+  $('#copy-all').innerHTML = `${ico('copy')}<span>Copiar todo</span>`;
+  const nb = $('#notify');
+  nb.innerHTML = ico(S.notify ? 'bell' : 'bellOff');
+  nb.setAttribute('aria-pressed', String(S.notify));
+  const label = S.notify ? 'Notificaciones de escritorio activadas' : 'Activar notificaciones de escritorio';
+  nb.setAttribute('aria-label', label); nb.title = label;
+}
+function toggleTheme() {
+  const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  store.set('theme', next);
+  paintTools();
+}
+async function toggleNotify() {
+  if (!('Notification' in window)) return toast('Este navegador no soporta notificaciones');
+  if (!S.notify && Notification.permission !== 'granted') {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return toast('El navegador bloqueó las notificaciones');
+  }
+  S.notify = !S.notify;
+  store.set('notify', S.notify);
+  paintTools();
+  toast(S.notify ? 'Te aviso cuando llegue algo nuevo' : 'Notificaciones apagadas');
+}
+function markSeen(rowEl) {
+  const k = rowEl?.dataset.key;
+  if (!k || S.seen.has(k)) return;
+  S.seen.add(k);
+  store.set('seen', [...S.seen]);
+  rowEl.querySelector('.new')?.remove();
+}
+function prOf(rowEl) {
+  const [sid, k] = rowEl.dataset.id.split('|');
+  return S.visible[sid]?.prs.find(p => keyOf(p) === k);
+}
+function copyAll() {
+  if (!S.data) return;
+  copy(allText(), 'toda la bandeja como texto');
+}
+
+/* selection + keys */
+const visibleRows = () => [...document.querySelectorAll('.pr')].filter(r => r.offsetParent !== null);
+function select(rowEl, focus = true) {
+  if (!rowEl) return;
+  document.querySelectorAll('.pr.sel').forEach(r => r.classList.remove('sel'));
+  rowEl.classList.add('sel');
+  S.sel = rowEl.dataset.id;
+  if (focus) { rowEl.querySelector('.t')?.focus({preventScroll: true}); rowEl.scrollIntoView({block: 'nearest'}); }
+}
+function move(step) {
+  const rows = visibleRows();
+  if (!rows.length) return;
+  const i = rows.findIndex(r => r.dataset.id === S.sel);
+  select(rows[i < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, i + step))]);
+}
+const current = () => S.sel ? $(`.pr[data-id="${CSS.escape(S.sel)}"]`) : null;
+
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const inField = e.target.matches?.('input, textarea, select');
+  if (inField) {
+    if (e.key === 'Escape') { if (e.target.value) { e.target.value = ''; setQuery(''); } else e.target.blur(); }
+    else if (e.key === 'Enter' && e.target.id === 'q') { e.preventDefault(); e.target.blur(); move(0); }
+    return;
+  }
+  if ($('#help').open) return;
+  const k = e.key, r = current(), p = r && prOf(r);
+  if (k === 'j' || k === 'ArrowDown') { e.preventDefault(); move(1); }
+  else if (k === 'k' || k === 'ArrowUp') { e.preventDefault(); move(-1); }
+  else if (k === 'o' || (k === 'Enter' && !e.target.closest?.('a, button, summary'))) { if (r) { e.preventDefault(); r.querySelector('.t')?.click(); } }
+  else if (k === 'y') { if (p) copy(p.md, `${repoName(p)} #${p.number} como texto`); }
+  else if (k === 'Y') copyAll();
+  else if (k === 'c') { if (r) r.dataset.ref ? copy(r.dataset.ref) : toast('Este PR no trae rama'); }
+  else if (k === 'g') { if (p) copy(`gh pr checkout ${p.number} -R ${p.repo}`); }
+  else if (k === '/') { e.preventDefault(); $('#q').focus(); $('#q').select(); }
+  else if (k === 'r') load(true);
+  else if (k === 't') toggleTheme();
+  else if (k === '?') $('#help').showModal();
+  else if (k === 'Escape') { if (S.q) setQuery(''); else { document.querySelectorAll('.pr.sel').forEach(x => x.classList.remove('sel')); S.sel = null; document.activeElement?.blur(); } }
+});
+
+let qTimer;
+function setQuery(v) {
+  S.q = v.trim();
+  $('#q').value = v;
+  if (S.data) render();
+}
+$('#q').addEventListener('input', e => { clearTimeout(qTimer); qTimer = setTimeout(() => setQuery(e.target.value), 80); });
+
+document.addEventListener('click', e => {
+  const t = e.target;
+  const link = t.closest('.pr a.t');
+  if (link) { markSeen(link.closest('.pr')); select(link.closest('.pr'), false); return; }
+  const cs = t.closest('[data-copy-sec]');
+  if (cs) {
+    e.preventDefault();
+    const sec = SECTIONS.find(s => s.id === cs.dataset.copySec);
+    copy(sectionText(sec) + filterNote() + '\n', `${sec.title} como texto`);
+    return;
+  }
+  const chip = t.closest('.chip');
+  if (chip) {
+    const r = chip.dataset.repo;
+    if (!r) S.repos.clear(); else S.repos.has(r) ? S.repos.delete(r) : S.repos.add(r);
+    store.set('repos', [...S.repos]);
+    render();
+    return;
+  }
+  const nav = t.closest('.nav a');
+  if (nav) { const d = $(`#sec-${nav.dataset.sec}`); if (d?.tagName === 'DETAILS' && !d.open) d.open = true; }
+  if (t.closest('[data-action="retry"]')) load(true);
+});
+document.addEventListener('toggle', e => {
+  const id = e.target.dataset?.sec;
+  if (!id) return;
+  e.target.open ? S.closed.delete(id) : S.closed.add(id);
+  store.set('closed', [...S.closed]);
+}, true);
+$('#copy-all').addEventListener('click', copyAll);
+$('#refresh').addEventListener('click', () => load(true));
+$('#theme').addEventListener('click', toggleTheme);
+$('#notify').addEventListener('click', toggleNotify);
+$('#help-btn').addEventListener('click', () => $('#help').showModal());
+$('#help-link').addEventListener('click', () => $('#help').showModal());
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTools);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && Date.now() - S.lastLoad > FOCUS_MIN_GAP_MS) load();
+});
+addEventListener('focus', () => { if (Date.now() - S.lastLoad > FOCUS_MIN_GAP_MS) load(); });
+
+paintTools();
+// why: paint the last snapshot instantly; a stale server cache costs 2-5s of gh calls on every F5.
+const snap = store.get('snap', null);
+if (snap?.login) { S.data = snap; S.cached = true; render(); }
+load();
+// why: keep polling in background tabs; that's when desktop notifications matter.
+setInterval(load, REFRESH_MS);
+setInterval(tick, 20_000);
+</script>
+</body>
+</html>

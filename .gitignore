@@ -1,0 +1,4 @@
+__pycache__/
+.DS_Store
+# why: real PR snapshot from GitHub, kept around for UI work, never committed.
+.sample.json
