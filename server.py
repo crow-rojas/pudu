@@ -31,13 +31,14 @@ query($q: String!, $n: Int!, $requested: Boolean!) {
 }
 fragment pr on PullRequest {
   number title url isDraft createdAt updatedAt mergedAt additions deletions changedFiles
-  reviewDecision mergeable mergeStateStatus baseRefName headRefName
+  reviewDecision mergeable mergeStateStatus baseRefName headRefName headRefOid
+  viewerLatestReview { commit { oid } }
   repository { name owner { login } nameWithOwner defaultBranchRef { name } }
   author { __typename login avatarUrl }
   labels(first: 20) { nodes { name color } }
   comments { totalCount }
   reviewThreads(first: 100) { nodes { isResolved comments { totalCount } } }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 50) { nodes {
+  commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 50) { nodes {
     ... on CheckRun { name conclusion } ... on StatusContext { context state }
   } } } } } }
   reviewRequests(first: 20) { nodes { requestedReviewer {
@@ -175,6 +176,9 @@ def slim(node, me=None):
       for r in nodes(node, "latestReviews") if r.get("author")
     ],
     "requestedAt": requested_at(node, me) if "timelineItems" in node else None,
+    "headCommittedAt": dig(commit, "commit", "committedDate"),
+    # why: a reviewed commit that is no longer the head means new commits landed after your review.
+    "rereview": bool(node.get("viewerLatestReview")) and dig(node, "viewerLatestReview", "commit", "oid") != node.get("headRefOid"),
   }
   p["md"] = md_line(p)
   return p
@@ -259,12 +263,16 @@ def search(q, n, requested=False):
   return out["data"]
 
 
-def build(review_raw, mine_raw, merged_raw):
+def build(review_raw, mine_raw, merged_raw, rereview_raw=None):
+  raws = {"review": review_raw, "mine": mine_raw, "merged": merged_raw, "rereview": rereview_raw or {}}
   me = dig(review_raw, "viewer", "login")
   prs = lambda raw: [slim(n, me) for n in nodes(raw, "search") if n.get("number")]
   desc = lambda items, key: sorted(items, key=lambda p: p[key] or "", reverse=True)
   review, mine = prs(review_raw), desc(prs(mine_raw), "updatedAt")
-  limits = [r["rateLimit"] for r in (review_raw, mine_raw, merged_raw) if r.get("rateLimit")]
+  # why: a PR in both searches keeps its review-requested entry, which carries requestedAt.
+  urls = {p["url"] for p in review}
+  review += [p for p in prs(raws["rereview"]) if p["rereview"] and p["url"] not in urls]
+  limits = [r["rateLimit"] for r in raws.values() if r.get("rateLimit")]
   low = min(limits, key=lambda r: r["remaining"], default=None)
   return {
     "login": me,
@@ -272,14 +280,17 @@ def build(review_raw, mine_raw, merged_raw):
     "fetchedAt": time.time(),
     "rateLimit": low and {**low, "cost": sum(r["cost"] for r in limits)},
     "review": {
-      # why: oldest request on top, it's the one that has waited longest; createdAt covers a missing event.
-      "humans": sorted((p for p in review if not p["bot"]), key=lambda p: p["requestedAt"] or p["createdAt"] or ""),
+      # why: oldest wait on top. A re-review waits since its head commit (updatedAt if unknown);
+      # createdAt covers a missing request event.
+      "humans": sorted((p for p in review if not p["bot"]), key=lambda p: (
+        p["requestedAt"] or (p["rereview"] and (p["headCommittedAt"] or p["updatedAt"])) or p["createdAt"] or ""
+      )),
       "bots": desc((p for p in review if p["bot"]), "updatedAt"),
     },
     "mine": {k: [p for p in mine if bucket(p) == k] for k in EMPTY["mine"]},
     "merged": desc(prs(merged_raw), "mergedAt"),
     "truncated": {
-      k: dig(raw, "search", "issueCount") for k, raw in (("review", review_raw), ("mine", mine_raw), ("merged", merged_raw))
+      k: dig(raw, "search", "issueCount") for k, raw in raws.items()
       if (dig(raw, "search", "issueCount") or 0) > len(dig(raw, "search", "nodes") or [])
     },
   }
@@ -289,14 +300,15 @@ def fetch():
   base = "is:pr is:open archived:false"
   # why: GitHub reads merged:>=DATE in UTC; a local date would shift the window near midnight.
   since = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-  # why: one combined query runs the three searches serially and hits GitHub's ~10s timeout (502);
-  # three parallel calls finish in the time of the slowest.
-  with ThreadPoolExecutor(3) as pool:
+  # why: one combined query runs the searches serially and hits GitHub's ~10s timeout (502);
+  # parallel calls finish in the time of the slowest.
+  with ThreadPoolExecutor(4) as pool:
     jobs = [
       # why: when results overflow `first`, keep the freshest; search has no sort by merge date.
       pool.submit(search, f"{base} review-requested:@me sort:updated-desc", 100, True),
       pool.submit(search, f"{base} author:@me sort:updated-desc", 100),
       pool.submit(search, f"is:pr author:@me is:merged merged:>={since} sort:updated-desc", 20),
+      pool.submit(search, f"{base} reviewed-by:@me -author:@me sort:updated-desc", 100),
     ]
     return build(*(j.result() for j in jobs))
 
