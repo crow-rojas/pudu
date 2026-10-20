@@ -180,76 +180,103 @@ def slim(node, me=None):
     # why: a reviewed commit that is no longer the head means new commits landed after your review.
     "rereview": bool(node.get("viewerLatestReview")) and dig(node, "viewerLatestReview", "commit", "oid") != node.get("headRefOid"),
   }
-  p["md"] = md_line(p)
   return p
 
 
-CI_MD = {"SUCCESS": "CI ok", "FAILURE": "CI falló", "ERROR": "CI con error", "PENDING": "CI corriendo", "EXPECTED": "CI por partir"}
-DECISION_MD = {"APPROVED": "aprobado", "CHANGES_REQUESTED": "cambios pedidos", "REVIEW_REQUIRED": "falta review"}
-REVIEW_MD = {"APPROVED": "aprobó", "CHANGES_REQUESTED": "pidió cambios", "COMMENTED": "comentó", "DISMISSED": "descartada"}
+STRINGS = {
+  "en": {
+    "ci": {"SUCCESS": "CI ok", "FAILURE": "CI failed", "ERROR": "CI errored", "PENDING": "CI running", "EXPECTED": "CI expected"},
+    "decision": {"APPROVED": "approved", "CHANGES_REQUESTED": "changes requested", "REVIEW_REQUIRED": "review required"},
+    "review": {"APPROVED": "approved", "CHANGES_REQUESTED": "requested changes", "COMMENTED": "commented", "DISMISSED": "dismissed"},
+    "sections": {
+      "review": "Needs your review", "returned": "Needs your attention", "approved": "Approved",
+      "waiting": "Waiting for review", "draft": "Drafts", "merged": "Merged this week", "bots": "Bots",
+    },
+    "rereview": "re-review: new commits", "pending": "pending: {}", "conflict": "conflict", "behind": "branch out of date",
+    "threads": "unresolved threads: {}", "files": " in {} file", "labels": "labels: {}", "days": "days",
+    "requested": "review requested {} ago", "merged": "merged {} ago", "updated": "updated {} ago",
+    "untitled": "(untitled)", "title": "# PRs for @{}", "hidden": "Hidden repos: {}.", "none": "(none)",
+    "nodata": "Pudú has no data yet: {}", "fetching": "querying GitHub",
+  },
+  "es": {
+    "ci": {"SUCCESS": "CI ok", "FAILURE": "CI falló", "ERROR": "CI con error", "PENDING": "CI corriendo", "EXPECTED": "CI por partir"},
+    "decision": {"APPROVED": "aprobado", "CHANGES_REQUESTED": "cambios pedidos", "REVIEW_REQUIRED": "falta review"},
+    "review": {"APPROVED": "aprobó", "CHANGES_REQUESTED": "pidió cambios", "COMMENTED": "comentó", "DISMISSED": "descartada"},
+    "sections": {
+      "review": "Necesitan tu review", "returned": "Necesitan tu atención", "approved": "Aprobados",
+      "waiting": "Esperando review", "draft": "Drafts", "merged": "Mergeados esta semana", "bots": "Bots",
+    },
+    "rereview": "re-review: commits nuevos", "pending": "pendiente de: {}", "conflict": "conflicto", "behind": "rama desactualizada",
+    "threads": "hilos sin resolver: {}", "files": " en {} archivo", "labels": "labels: {}", "days": "días",
+    "requested": "review pedida hace {}", "merged": "mergeado hace {}", "updated": "actualizado hace {}",
+    "untitled": "(sin título)", "title": "# PRs de @{}", "hidden": "Repos ocultos: {}.", "none": "(ninguno)",
+    "nodata": "Pudú todavía no tiene datos: {}", "fetching": "consultando GitHub",
+  },
+}
+LANG = os.environ.get("PUDU_LANG") if os.environ.get("PUDU_LANG") in STRINGS else "en"
 MD_SECTIONS = [
-  ("review", "Necesitan tu review", ("review", "humans")),
-  ("returned", "Necesitan tu atención", ("mine", "returned")),
-  ("approved", "Aprobados", ("mine", "approved")),
-  ("waiting", "Esperando review", ("mine", "waiting")),
-  ("draft", "Drafts", ("mine", "draft")),
-  ("merged", "Mergeados esta semana", ("merged",)),
-  ("bots", "Bots", ("review", "bots")),
+  ("review", ("review", "humans")), ("returned", ("mine", "returned")), ("approved", ("mine", "approved")),
+  ("waiting", ("mine", "waiting")), ("draft", ("mine", "draft")), ("merged", ("merged",)), ("bots", ("review", "bots")),
 ]
 
 
-def ago(iso):
+def ago(iso, lang="en"):
   try:
     m = max(0, (time.time() - datetime.datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()) / 60)
   except (AttributeError, ValueError):
     return None
-  return f"{m:.0f} min" if m < 60 else f"{m / 60:.0f} h" if m < 2880 else f"{m / 1440:.0f} días"
+  return f"{m:.0f} min" if m < 60 else f"{m / 60:.0f} h" if m < 2880 else f"{m / 1440:.0f} {STRINGS[lang]['days']}"
 
 
 # why: the text a screenshot would carry, shaped for an LLM — the UI's copy buttons and /inbox.md share it.
-def md_line(p):
+def md_line(p, lang="en"):
+  s = STRINGS[lang]
   bits = [f"@{p['author']}"]
   if p["headRef"]:
     bits.append(f"{p['headRef']} -> {p['baseRef']}")
   if p["draft"]:
     bits.append("draft")
-  if p["checks"] in CI_MD:
+  if p.get("rereview"):
+    bits.append(s["rereview"])
+  if p["checks"] in s["ci"]:
     failed = p["failedChecks"][:5]
-    bits.append(CI_MD[p["checks"]] + (f" ({', '.join(failed)})" if failed else ""))
-  if p["decision"] in DECISION_MD:
-    bits.append(DECISION_MD[p["decision"]])
+    bits.append(s["ci"][p["checks"]] + (f" ({', '.join(failed)})" if failed else ""))
+  if p["decision"] in s["decision"]:
+    bits.append(s["decision"][p["decision"]])
   if p["reviews"]:
-    bits.append("reviews: " + ", ".join(f"{r['login']} {REVIEW_MD.get(r['state'], str(r['state']).lower())}" for r in p["reviews"]))
+    bits.append("reviews: " + ", ".join(f"{r['login']} {s['review'].get(r['state'], str(r['state']).lower())}" for r in p["reviews"]))
   if p["pending"]:
-    bits.append("pendiente de: " + ", ".join(r["login"] for r in p["pending"]))
+    bits.append(s["pending"].format(", ".join(r["login"] for r in p["pending"])))
   if p["conflict"] or p["mergeState"] == "DIRTY":
-    bits.append("conflicto")
+    bits.append(s["conflict"])
   elif p["mergeState"] == "BEHIND":
-    bits.append("rama desactualizada")
+    bits.append(s["behind"])
   if p["unresolvedThreads"]:
-    bits.append(f"hilos sin resolver: {p['unresolvedThreads']}")
+    bits.append(s["threads"].format(p["unresolvedThreads"]))
   if p["additions"] is not None:
-    bits.append(f"+{p['additions']} -{p['deletions']}" + (f" en {p['changedFiles']} archivo{'s' * (p['changedFiles'] != 1)}" if p["changedFiles"] is not None else ""))
+    n = p["changedFiles"]
+    bits.append(f"+{p['additions']} -{p['deletions']}" + (s["files"].format(n) + "s" * (n != 1) if n is not None else ""))
   if p["labels"]:
-    bits.append("labels: " + ", ".join(l["name"] for l in p["labels"]))
-  when = next(((label, ago(iso)) for label, iso in (
-    ("review pedida hace", p["requestedAt"]), ("mergeado hace", p["mergedAt"]), ("actualizado hace", p["updatedAt"]),
+    bits.append(s["labels"].format(", ".join(l["name"] for l in p["labels"])))
+  when = next((s[key].format(ago(iso, lang)) for key, iso in (
+    ("requested", p["requestedAt"]), ("merged", p["mergedAt"]), ("updated", p["updatedAt"]),
   ) if ago(iso)), None)
   if when:
-    bits.append(" ".join(when))
-  return f"- {p['title'] or '(sin título)'} ({p['repo']}#{p['number']}) {p['url']}\n  " + " · ".join(bits)
+    bits.append(when)
+  return f"- {p['title'] or s['untitled']} ({p['repo']}#{p['number']}) {p['url']}\n  " + " · ".join(bits)
 
 
-def inbox_md(d, only=()):
-  parts = [f"# PRs de @{d['login']}"]
+def inbox_md(d, only=(), lang="en"):
+  s = STRINGS[lang]
+  parts = [s["title"].format(d["login"])]
   hidden = [r["repo"] for r in d.get("repos", []) if r["hidden"]]
   if hidden:
-    parts.append(f"Repos ocultos: {', '.join(hidden)}.")
-  for sid, title, path in MD_SECTIONS:
+    parts.append(s["hidden"].format(", ".join(hidden)))
+  for sid, path in MD_SECTIONS:
     if only and sid not in only:
       continue
     prs = dig(d, *path) or []
-    parts.append(f"## {title} ({len(prs)})\n\n" + ("\n".join(p["md"] for p in prs) or "(ninguno)"))
+    parts.append(f"## {s['sections'][sid]} ({len(prs)})\n\n" + ("\n".join(p["md"] for p in prs) or s["none"]))
   return "\n\n".join(parts) + "\n"
 
 
@@ -346,12 +373,13 @@ LISTS = [("review", "humans"), ("review", "bots"), *(("mine", k) for k in EMPTY[
 
 
 # why: hiding happens here, not in the page, so the tab badge, notifications and /inbox.md all agree.
-def view(d, hidden):
+# why: md is built here per request because the cache is shared by clients asking in different languages.
+def view(d, hidden, lang="en"):
   counts = {}
   for path in LISTS:
     for p in dig(d, *path) or []:
       counts[p["repo"]] = counts.get(p["repo"], 0) + 1
-  keep = lambda *path: [p for p in dig(d, *path) or [] if p["repo"] not in hidden]
+  keep = lambda *path: [{**p, "md": md_line(p, lang)} for p in dig(d, *path) or [] if p["repo"] not in hidden]
   return {
     **d,
     "review": {"humans": keep("review", "humans"), "bots": keep("review", "bots")},
@@ -361,7 +389,7 @@ def view(d, hidden):
   }
 
 
-def data(force=False):
+def data(force=False, lang="en"):
   with _lock:
     age = time.time() - _cache["at"]
     if (force and age >= FORCE_MIN_SECONDS) or age > CACHE_SECONDS:
@@ -370,10 +398,15 @@ def data(force=False):
       except Exception as e:  # why: a network blip keeps showing the last good snapshot, flagged.
         _cache.update(error=str(e), errorKind=error_kind(e))
       _cache["at"] = time.time()
-    return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"], "errorKind": _cache["errorKind"]}, hidden_repos())
+    return view({**EMPTY, **(_cache["data"] or {}), "error": _cache["error"], "errorKind": _cache["errorKind"]}, hidden_repos(), lang)
 
 
-MISSING_FRONTEND = "<!doctype html><meta charset=utf-8><title>Pudú</title><p>Falta el frontend: no existe index.html junto a server.py.".encode()
+def pick_lang(qs):
+  lang = (qs.get("lang") or [""])[0]
+  return lang if lang in STRINGS else LANG
+
+
+MISSING_FRONTEND = "<!doctype html><meta charset=utf-8><title>Pudú</title><p>Missing frontend: there is no index.html next to server.py.".encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -393,17 +426,18 @@ class Handler(BaseHTTPRequestHandler):
     if not self._allowed():
       return self._send(403, "text/plain", b"forbidden")
     url = urlsplit(self.path)
+    qs = parse_qs(url.query)
+    lang = pick_lang(qs)
     if url.path == "/api/data":
-      force = parse_qs(url.query).get("force") == ["1"]
-      self._send(200, "application/json", json.dumps(data(force)).encode())
+      self._send(200, "application/json", json.dumps(data(qs.get("force") == ["1"], lang)).encode())
     elif url.path == "/inbox.md":
-      qs = parse_qs(url.query)
-      d = data(qs.get("force") == ["1"])
+      d = data(qs.get("force") == ["1"], lang)
       if not d["login"]:
-        self._send(503, "text/plain; charset=utf-8", f"Pudú todavía no tiene datos: {d['error'] or 'consultando GitHub'}\n".encode())
+        s = STRINGS[lang]
+        self._send(503, "text/plain; charset=utf-8", (s["nodata"].format(d["error"] or s["fetching"]) + "\n").encode())
       else:
         only = {s for v in qs.get("s", []) for s in v.split(",") if s}
-        self._send(200, "text/markdown; charset=utf-8", inbox_md(d, only).encode())
+        self._send(200, "text/markdown; charset=utf-8", inbox_md(d, only, lang).encode())
     elif url.path == "/":
       page = HERE / "index.html"
       self._send(200, "text/html; charset=utf-8", page.read_bytes() if page.exists() else MISSING_FRONTEND)
@@ -416,7 +450,8 @@ class Handler(BaseHTTPRequestHandler):
     if not self._allowed():
       return self._send(403, "text/plain", b"forbidden")
     # why: demanding JSON forces a CORS preflight, so another web page can't rewrite the config.
-    if urlsplit(self.path).path != "/api/hidden" or not self.headers.get("Content-Type", "").startswith("application/json"):
+    url = urlsplit(self.path)
+    if url.path != "/api/hidden" or not self.headers.get("Content-Type", "").startswith("application/json"):
       return self._send(404, "text/plain", b"not found")
     body = self._body()
     if body is None:
@@ -428,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
     if not isinstance(repos, list) or len(repos) > 1000 or not all(isinstance(r, str) and 0 < len(r) < 200 for r in repos):
       return self._send(400, "text/plain", b"bad request")
     save_hidden(set(repos))
-    self._send(200, "application/json", json.dumps(data()).encode())
+    self._send(200, "application/json", json.dumps(data(lang=pick_lang(parse_qs(url.query)))).encode())
 
   def _send(self, code, ctype, body):
     self.send_response(code)
@@ -478,9 +513,15 @@ def selftest():
   assert p["reviews"] == [{"login": "a", "state": "APPROVED", "avatar": "x"}]
   assert p["requestedAt"] == "T3"
   assert p["threads"] == 2
-  assert p["md"].startswith("- t (o/r#1) u\n  @dependabot · feat/x -> feat/base · CI falló (lint, ci/x) · cambios pedidos")
-  assert "conflicto" in p["md"] and "hilos sin resolver: 1" in p["md"] and "+1 -2 en 1 archivo ·" in p["md"]
-  assert "pendiente de: team:devs, me" in p["md"] and p["md"].endswith("actualizado hace " + ago(node["updatedAt"]))
+  es, en = md_line(p, "es"), md_line(p)
+  assert es.startswith("- t (o/r#1) u\n  @dependabot · feat/x -> feat/base · CI falló (lint, ci/x) · cambios pedidos")
+  assert "conflicto" in es and "hilos sin resolver: 1" in es and "+1 -2 en 1 archivo ·" in es
+  assert "pendiente de: team:devs, me" in es and es.endswith("actualizado hace " + ago(node["updatedAt"], "es"))
+  assert en.startswith("- t (o/r#1) u\n  @dependabot · feat/x -> feat/base · CI failed (lint, ci/x) · changes requested")
+  assert "conflict ·" in en and "unresolved threads: 1" in en and "+1 -2 in 1 file ·" in en and "pending: team:devs, me" in en
+  assert en.endswith("updated " + ago(node["updatedAt"]) + " ago") and ago(node["updatedAt"]).endswith(" days")
+  assert "re-review" not in en and "re-review: commits nuevos" in md_line({**p, "rereview": True}, "es")
+  assert "in 3 files" in md_line({**p, "changedFiles": 3}) and "(untitled)" in md_line({**p, "title": None})
   assert slim(node, "nobody")["requestedAt"] == "T2"
   assert slim({k: v for k, v in node.items() if k != "timelineItems"}, "me")["requestedAt"] is None
   assert not slim({**node, "baseRefName": "develop"})["stacked"]
@@ -520,11 +561,16 @@ def selftest():
   v = view(out, {"o/r", "gone/repo"})
   assert v["review"]["humans"] == [] and v["mine"]["approved"] == [] and v["merged"] == []
   assert v["repos"] == [{"repo": "gone/repo", "count": 0, "hidden": True}, {"repo": "o/r", "count": 9, "hidden": True}]
-  assert view(out, set())["review"] == out["review"]
-  assert inbox_md(v).startswith("# PRs de @me\n\nRepos ocultos: gone/repo, o/r.\n\n## Necesitan tu review (0)")
-  md = inbox_md(out)
+  ves = view(out, set(), "es")
+  assert [{k: x for k, x in p.items() if k != "md"} for p in ves["review"]["humans"]] == out["review"]["humans"]
+  assert ves["review"]["humans"][0]["md"] == md_line(out["review"]["humans"][0], "es")
+  assert inbox_md(view(out, {"o/r", "gone/repo"}, "es"), (), "es").startswith("# PRs de @me\n\nRepos ocultos: gone/repo, o/r.\n\n## Necesitan tu review (0)")
+  md = inbox_md(ves, (), "es")
   assert md.startswith("# PRs de @me\n\n## Necesitan tu review (2)\n\n- t (o/r#2)") and "## Necesitan tu atención (1)\n\n- t (o/r#8)" in md
-  assert inbox_md(out, {"approved"}) == f"# PRs de @me\n\n## Aprobados (1)\n\n{out['mine']['approved'][0]['md']}\n"
+  assert inbox_md(ves, {"approved"}, "es") == f"# PRs de @me\n\n## Aprobados (1)\n\n{ves['mine']['approved'][0]['md']}\n"
+  md = inbox_md(view(out, set()))
+  assert md.startswith("# PRs for @me\n\n## Needs your review (2)\n\n- t (o/r#2)") and "## Needs your attention (1)\n\n- t (o/r#8)" in md
+  assert "## Merged this week (2)" in md and "merged " in md
   print("ok")
 
 
@@ -532,5 +578,5 @@ if __name__ == "__main__":
   if sys.argv[1:] == ["--test"]:
     selftest()
   else:
-    print(f"Pudú en http://localhost:{PORT}")
+    print(f"Pudú on http://localhost:{PORT}")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
