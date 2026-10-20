@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -206,28 +206,28 @@ dialog form{margin-top:16px;text-align:right}
 </style>
 </head>
 <body>
-<a class="skip" href="#main">Saltar al contenido</a>
+<a class="skip" href="#main" data-i18n="skip"></a>
 <header class="top">
-  <a class="brand" href="/" aria-label="Pudú, inicio"><img src="/favicon.svg" alt="" width="24" height="24"><span>Pudú</span></a>
+  <a class="brand" href="/" data-i18n-attr="aria-label:home"><img src="/favicon.svg" alt="" width="24" height="24"><span>Pudú</span></a>
   <label class="search">
-    <span class="sr">Filtrar PRs</span>
+    <span class="sr" data-i18n="filter"></span>
     <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input id="q" type="search" placeholder="Filtrar PRs" title="Busca en título, repo, autor, número, rama y labels" autocomplete="off" spellcheck="false">
+    <input id="q" type="search" data-i18n-attr="placeholder:filter,title:filterTip" autocomplete="off" spellcheck="false">
     <kbd>/</kbd>
   </label>
   <div class="tools">
-    <button class="btn" id="repos-btn" type="button" popovertarget="repos" title="Elegir qué repos se muestran"></button>
-    <button class="btn" id="copy-all" type="button" title="Copiar todo lo visible como texto (Y)"></button>
-    <button class="ib" id="refresh" type="button" aria-label="Refrescar ahora (r)" title="Refrescar ahora (r)"></button>
+    <button class="btn" id="repos-btn" type="button" popovertarget="repos" data-i18n-attr="title:reposTip"></button>
+    <button class="btn" id="copy-all" type="button" data-i18n-attr="title:copyAllTip"></button>
+    <button class="ib" id="refresh" type="button" data-i18n-attr="aria-label:refreshTip,title:refreshTip"></button>
     <button class="ib" id="notify" type="button" aria-pressed="false"></button>
-    <button class="ib" id="theme" type="button" aria-label="Cambiar tema (t)" title="Cambiar tema (t)"></button>
-    <button class="ib" id="help-btn" type="button" aria-label="Atajos de teclado (?)" title="Atajos de teclado (?)"></button>
+    <button class="ib" id="theme" type="button" data-i18n-attr="aria-label:themeTip,title:themeTip"></button>
+    <button class="ib" id="help-btn" type="button" data-i18n-attr="aria-label:helpTip,title:helpTip"></button>
     <img class="me" id="me" alt="" width="26" height="26" referrerpolicy="no-referrer">
   </div>
 </header>
 
 <div class="shell">
-  <nav class="side" aria-label="Secciones"><ul class="nav" id="nav"></ul></nav>
+  <nav class="side" data-i18n-attr="aria-label:sections"><ul class="nav" id="nav"></ul></nav>
   <main id="main">
     <div id="banner" class="banner" role="status" hidden></div>
     <div id="app" aria-busy="true">
@@ -237,31 +237,19 @@ dialog form{margin-top:16px;text-align:right}
 </div>
 
 <footer class="foot">
-  <span id="fresh">Conectando con GitHub…</span>
+  <span id="fresh" data-i18n="connecting"></span>
   <span id="rate"></span>
-  <span>Para Claude: <code>curl -s localhost:8765/inbox.md</code></span>
-  <button type="button" id="help-link">Atajos de teclado <kbd>?</kbd></button>
+  <span><span data-i18n="forClaude"></span> <code id="curl"></code></span>
+  <button type="button" id="help-link"><span data-i18n="shortcuts"></span> <kbd>?</kbd></button>
 </footer>
 
 <dialog id="help" aria-labelledby="help-title">
-  <h2 id="help-title"><img src="/favicon.svg" alt="">Atajos</h2>
-  <dl>
-    <dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Bajar y subir entre PRs</dd>
-    <dt><kbd>o</kbd><kbd>Enter</kbd></dt><dd>Abrir el PR en GitHub</dd>
-    <dt><kbd>y</kbd></dt><dd>Copiar el PR como texto</dd>
-    <dt><kbd>Y</kbd></dt><dd>Copiar todo lo visible como texto</dd>
-    <dt><kbd>c</kbd></dt><dd>Copiar la rama del PR</dd>
-    <dt><kbd>g</kbd></dt><dd>Copiar <code>gh pr checkout</code></dd>
-    <dt><kbd>/</kbd></dt><dd>Filtrar</dd>
-    <dt><kbd>r</kbd></dt><dd>Refrescar sin caché</dd>
-    <dt><kbd>t</kbd></dt><dd>Cambiar entre claro y oscuro</dd>
-    <dt><kbd>Esc</kbd></dt><dd>Limpiar filtro o cerrar</dd>
-    <dt><kbd>?</kbd></dt><dd>Mostrar esta ayuda</dd>
-  </dl>
-  <form method="dialog"><button class="btn" autofocus>Listo</button></form>
+  <h2 id="help-title"><img src="/favicon.svg" alt=""><span data-i18n="shortcuts"></span></h2>
+  <dl id="keys"></dl>
+  <form method="dialog"><button class="btn" autofocus data-i18n="done"></button></form>
 </dialog>
-<div class="pop" id="repos" popover aria-label="Repos visibles">
-  <div class="pop-h"><span>Los repos ocultos no cuentan ni notifican.</span><button type="button" data-show-all>Mostrar todos</button></div>
+<div class="pop" id="repos" popover data-i18n-attr="aria-label:reposTip">
+  <div class="pop-h"><span data-i18n="hiddenNote"></span><button type="button" data-show-all data-i18n="showAll"></button></div>
   <div id="repo-list"></div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -271,6 +259,79 @@ dialog form{margin-top:16px;text-align:right}
 const REFRESH_MS = 60_000;
 const FOCUS_MIN_GAP_MS = 15_000;
 const $ = s => document.querySelector(s);
+
+// why: one table per language; English is the fallback for any key a translation misses.
+const T = {
+  en: {
+    skip: 'Skip to content', home: 'Pudú, home', filter: 'Filter PRs', filterTip: 'Searches title, repo, author, number, branch and labels',
+    reposTip: 'Choose which repos to show', copyAllTip: 'Copy everything visible as text (Y)', refreshTip: 'Refresh now (r)',
+    themeTip: 'Toggle theme (t)', helpTip: 'Keyboard shortcuts (?)', sections: 'Sections', connecting: 'Connecting to GitHub…',
+    forClaude: 'For Claude:', shortcuts: 'Keyboard shortcuts', done: 'Done', hiddenNote: "Hidden repos don't count or notify.", showAll: 'Show all',
+    s_review: 'Needs your review', s_returned: 'Needs your attention', s_approved: 'Approved', s_waiting: 'Waiting for review',
+    s_draft: 'Drafts', s_merged: 'Merged this week', s_bots: 'Bots',
+    n_review: 'Review requested', n_returned: 'Your PR needs attention', n_approved: 'Your PR was approved',
+    justNow: 'just now', now: 'now', noTitle: '(no title)', none: '(none)', of: (a, b) => `${a} of ${b}`,
+    copy: 'Copy', copyAll: 'Copy all', copySecTip: 'Copy this section as text', copied: w => `Copied: ${w}`, copyFail: "Couldn't copy to the clipboard",
+    asText: w => `${w} as text`, wholeInbox: 'the whole inbox as text', noBranch: 'This PR has no branch',
+    inboxOf: l => `PRs for @${l}`, hiddenRepos: r => `Hidden repos: ${r}.`, filteredBy: q => `Filtered by text "${q}".`,
+    upToDate: 'Up to date', netErr: 'network error', fetched: a => `GitHub data ${a}`,
+    notifOn: 'Desktop notifications on', notifOff: 'Turn on desktop notifications', notifUnsupported: "This browser doesn't support notifications",
+    notifBlocked: 'The browser blocked notifications', notifyYes: "I'll tell you when something new arrives", notifyNo: 'Notifications off',
+    k_move: 'Move down and up between PRs', k_open: 'Open the PR on GitHub', k_copy: 'Copy the PR as text', k_copyAll: 'Copy everything visible as text',
+    k_branch: "Copy the PR's branch", k_checkout: 'Copy <code>gh pr checkout</code>', k_filter: 'Filter', k_refresh: 'Refresh, skipping the cache',
+    k_theme: 'Switch between light and dark', k_esc: 'Clear the filter or close', k_help: 'Show this help',
+    r_APPROVED: l => `${l} approved`, r_CHANGES_REQUESTED: l => `${l} requested changes`, r_COMMENTED: l => `${l} commented`, r_DISMISSED: l => `${l}'s review was dismissed`,
+    pendYou: 'Waiting for your review', pendOf: l => `Waiting for ${l}'s review`,
+    thrOpen: (o, n) => `${o} of ${n} threads unresolved`, thrDone: n => `${n} threads, all resolved`,
+    ci_SUCCESS: 'CI passed', ci_FAILURE: 'CI failed', ci_ERROR: 'CI errored', ci_PENDING: 'CI running', ci_EXPECTED: 'CI about to start',
+    approved: 'Approved', changesReq: 'Changes requested', reviewMissing: 'Review required', noReview: 'No review yet', merged: 'Merged',
+    conflictWith: b => `Conflicts with ${b || 'the base branch'}`, behindOf: b => `Behind ${b || 'the base branch'}`, mergeable: 'Ready to merge',
+    lines: (n, f) => `${n} lines` + (f == null ? '' : ` in ${f} file${f === 1 ? '' : 's'}`),
+    requested: 'Review requested', updated: 'Updated', waitCol: 'Waiting', draft: 'Draft', stackedOn: b => `Stacked on ${b}`, new: 'New',
+    title: 'Title', reviewers: 'Reviewers', threads: 'Unresolved threads', changes: 'Changes', noMatch: 'No PR matches the filter.',
+    someRepos: (a, b) => `${a} of ${b} repos`, allRepos: 'All repos', saveReposFail: "Couldn't save the repos:",
+    noServer: e => `Can't reach the local server (${e}). Retrying every minute.`,
+    staleData: (e, at) => `GitHub didn't answer the last refresh (${e}). What you see is from ${at}.`,
+    apiPoints: (n, at) => `${n} API points left` + (at ? `, resets at ${at}` : ''),
+    noDataYet: 'No data yet', serverAsking: 'The server is asking GitHub.', retry: 'Retry', noDataShort: 'No data yet',
+  },
+  es: {
+    skip: 'Saltar al contenido', home: 'Pudú, inicio', filter: 'Filtrar PRs', filterTip: 'Busca en título, repo, autor, número, rama y labels',
+    reposTip: 'Elegir qué repos se muestran', copyAllTip: 'Copiar todo lo visible como texto (Y)', refreshTip: 'Refrescar ahora (r)',
+    themeTip: 'Cambiar tema (t)', helpTip: 'Atajos de teclado (?)', sections: 'Secciones', connecting: 'Conectando con GitHub…',
+    forClaude: 'Para Claude:', shortcuts: 'Atajos de teclado', done: 'Listo', hiddenNote: 'Los repos ocultos no cuentan ni notifican.', showAll: 'Mostrar todos',
+    s_review: 'Necesitan tu review', s_returned: 'Necesitan tu atención', s_approved: 'Aprobados', s_waiting: 'Esperando review',
+    s_draft: 'Drafts', s_merged: 'Mergeados esta semana', s_bots: 'Bots',
+    n_review: 'Te pidieron review', n_returned: 'Tu PR necesita atención', n_approved: 'Aprobaron tu PR',
+    justNow: 'recién', now: 'ahora', noTitle: '(sin título)', none: '(ninguno)', of: (a, b) => `${a} de ${b}`,
+    copy: 'Copiar', copyAll: 'Copiar todo', copySecTip: 'Copiar la sección como texto', copied: w => `Copiado: ${w}`, copyFail: 'No pude copiar al portapapeles',
+    asText: w => `${w} como texto`, wholeInbox: 'toda la bandeja como texto', noBranch: 'Este PR no trae rama',
+    inboxOf: l => `PRs de @${l}`, hiddenRepos: r => `Repos ocultos: ${r}.`, filteredBy: q => `Filtrado por texto "${q}".`,
+    upToDate: 'Al día', netErr: 'error de red', fetched: a => `Datos de GitHub ${a}`,
+    notifOn: 'Notificaciones de escritorio activadas', notifOff: 'Activar notificaciones de escritorio', notifUnsupported: 'Este navegador no soporta notificaciones',
+    notifBlocked: 'El navegador bloqueó las notificaciones', notifyYes: 'Te aviso cuando llegue algo nuevo', notifyNo: 'Notificaciones apagadas',
+    k_move: 'Bajar y subir entre PRs', k_open: 'Abrir el PR en GitHub', k_copy: 'Copiar el PR como texto', k_copyAll: 'Copiar todo lo visible como texto',
+    k_branch: 'Copiar la rama del PR', k_checkout: 'Copiar <code>gh pr checkout</code>', k_filter: 'Filtrar', k_refresh: 'Refrescar sin caché',
+    k_theme: 'Cambiar entre claro y oscuro', k_esc: 'Limpiar filtro o cerrar', k_help: 'Mostrar esta ayuda',
+    r_APPROVED: l => `${l} aprobó`, r_CHANGES_REQUESTED: l => `${l} pidió cambios`, r_COMMENTED: l => `${l} comentó`, r_DISMISSED: l => `Review de ${l} descartada`,
+    pendYou: 'Falta tu review', pendOf: l => `Falta la review de ${l}`,
+    thrOpen: (o, n) => `${o} de ${n} hilos sin resolver`, thrDone: n => `${n} hilos, todos resueltos`,
+    ci_SUCCESS: 'CI en verde', ci_FAILURE: 'CI falló', ci_ERROR: 'CI con error', ci_PENDING: 'CI corriendo', ci_EXPECTED: 'CI por partir',
+    approved: 'Aprobado', changesReq: 'Cambios pedidos', reviewMissing: 'Falta review', noReview: 'Sin review', merged: 'Mergeado',
+    conflictWith: b => `Conflicto con ${b || 'la base'}`, behindOf: b => `Atrás de ${b || 'la base'}`, mergeable: 'Listo para mergear',
+    lines: (n, f) => `${n} líneas` + (f == null ? '' : ` en ${f} archivo${f === 1 ? '' : 's'}`),
+    requested: 'Te pidieron review', updated: 'Actualizado', waitCol: 'Espera', draft: 'Draft', stackedOn: b => `Apilado sobre ${b}`, new: 'Nuevo',
+    title: 'Título', reviewers: 'Reviewers', threads: 'Hilos sin resolver', changes: 'Cambios', noMatch: 'Ningún PR coincide con el filtro.',
+    someRepos: (a, b) => `${a} de ${b} repos`, allRepos: 'Todos los repos', saveReposFail: 'No pude guardar los repos:',
+    noServer: e => `No hay conexión con el server local (${e}). Sigo intentando cada minuto.`,
+    staleData: (e, at) => `GitHub no respondió en el último refresco (${e}). Lo que ves es de las ${at}.`,
+    apiPoints: (n, at) => `${n} puntos de API` + (at ? `, se renueva a las ${at}` : ''),
+    noDataYet: 'Todavía no hay datos', serverAsking: 'El server está consultando GitHub.', retry: 'Reintentar', noDataShort: 'Sin datos todavía',
+  },
+};
+const LANG = /^es\b/i.test((navigator.languages || [])[0] || navigator.language || '') ? 'es' : 'en';
+const t = (k, ...a) => { const v = T[LANG][k] ?? T.en[k] ?? k; return typeof v === 'function' ? v(...a) : v; };
+document.documentElement.lang = LANG;
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('pudu.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
@@ -282,8 +343,9 @@ const safeUrl = u => (typeof u === 'string' && /^https:\/\//i.test(u)) ? esc(u) 
 const arr = a => Array.isArray(a) ? a : [];
 const keyOf = p => `${p.repo}#${p.number}`;
 const repoName = p => p.name || String(p.repo || '').split('/').pop() || '?';
-const num = new Intl.NumberFormat('es');
-const rtf = new Intl.RelativeTimeFormat('es', {numeric: 'auto', style: 'short'});
+const num = new Intl.NumberFormat(LANG);
+const rtf = new Intl.RelativeTimeFormat(LANG, {numeric: 'auto', style: 'short'});
+const hhmm = ms => new Date(ms).toLocaleTimeString(LANG, {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
 const norm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const P = {
@@ -314,20 +376,15 @@ const ico = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="no
 
 // why: titles must match MD_SECTIONS in server.py so a copied section reads the same as /inbox.md.
 const SECTIONS = [
-  {id: 'review', title: 'Necesitan tu review', urgent: true, when: 'wait', get: d => d.review?.humans},
-  {id: 'returned', title: 'Te devolvieron cambios', urgent: true, get: d => d.mine?.returned},
-  {id: 'approved', title: 'Aprobados', get: d => d.mine?.approved},
-  {id: 'waiting', title: 'Esperando review', get: d => d.mine?.waiting},
-  {id: 'draft', title: 'Drafts', get: d => d.mine?.draft},
-  {id: 'merged', title: 'Mergeados esta semana', when: 'merged', gapBefore: true, get: d => d.merged},
-  {id: 'bots', title: 'Bots', get: d => d.review?.bots},
-];
-const WHEN_LABEL = {wait: 'Espera', merged: 'Mergeado'};
-const NOTIFY_ON = [
-  ['review', 'Te pidieron review'],
-  ['returned', 'Te devolvieron cambios'],
-  ['approved', 'Aprobaron tu PR'],
-];
+  {id: 'review', urgent: true, when: 'wait', get: d => d.review?.humans},
+  {id: 'returned', urgent: true, get: d => d.mine?.returned},
+  {id: 'approved', get: d => d.mine?.approved},
+  {id: 'waiting', get: d => d.mine?.waiting},
+  {id: 'draft', get: d => d.mine?.draft},
+  {id: 'merged', when: 'merged', gapBefore: true, get: d => d.merged},
+  {id: 'bots', get: d => d.review?.bots},
+].map(s => ({...s, title: t('s_' + s.id)}));
+const NOTIFY_ON = ['review', 'returned', 'approved'];
 
 const S = {
   data: null, netError: null, loading: false, lastLoad: 0,
@@ -340,10 +397,10 @@ const S = {
 
 /* time */
 function ago(iso) {
-  const t = Date.parse(iso);
-  if (!t) return '';
-  const s = (t - Date.now()) / 1000, a = Math.abs(s);
-  if (a < 45) return 'recién';
+  const ms = Date.parse(iso);
+  if (!ms) return '';
+  const s = (ms - Date.now()) / 1000, a = Math.abs(s);
+  if (a < 45) return t('justNow');
   if (a < 3600) return rtf.format(Math.round(s / 60), 'minute');
   if (a < 86400) return rtf.format(Math.round(s / 3600), 'hour');
   return rtf.format(Math.round(s / 86400), 'day');
@@ -352,13 +409,16 @@ function short(iso) {
   const m = (Date.now() - Date.parse(iso)) / 6e4;
   if (!(m >= 0)) return ['', 0];
   const h = m / 60, urgency = h < 24 ? 0 : h < 72 ? 1 : 2;
-  if (m < 1) return ['ahora', 0];
-  if (m < 60) return [`${Math.floor(m)}m`, 0];
-  if (h < 24) return [`${Math.floor(h)}h`, 0];
-  if (h < 24 * 60) return [`${Math.floor(h / 24)}d`, urgency];
-  return [`${Math.floor(h / 24 / 30)}mes`, urgency];
+  if (m < 1) return [t('now'), 0];
+  if (m < 60) return [dur(m, 'minute'), 0];
+  if (h < 24) return [dur(h, 'hour'), 0];
+  if (h < 24 * 30) return [dur(h / 24, 'day'), urgency];
+  if (h < 24 * 365) return [dur(h / 24 / 30, 'month', 'long'), urgency];
+  return [dur(h / 24 / 365, 'year', 'long'), urgency];
 }
-const fullDate = iso => { const t = Date.parse(iso); return t ? new Date(t).toLocaleString('es', {dateStyle: 'medium', timeStyle: 'short'}) : ''; };
+// why: Spanish short months render "3 m.", which reads as minutes; spell out the long units.
+const dur = (n, unit, unitDisplay = 'short') => new Intl.NumberFormat(LANG, {style: 'unit', unit, unitDisplay}).format(Math.floor(n));
+const fullDate = iso => { const ms = Date.parse(iso); return ms ? new Date(ms).toLocaleString(LANG, {dateStyle: 'medium', timeStyle: 'short'}) : ''; };
 
 /* cells */
 function avatar(login, src, {cls = '', state, title} = {}) {
@@ -371,18 +431,18 @@ function avatar(login, src, {cls = '', state, title} = {}) {
   return `<span class="av ${cls} ${isTeam ? 'team' : ''}" title="${esc(title || login)}">${img}${badge}</span>`;
 }
 const REVIEW_STATE = {
-  APPROVED: ['check', '--ok', 'aprobó'],
-  CHANGES_REQUESTED: ['x', '--bad', 'pidió cambios'],
-  COMMENTED: ['comment', '--muted', 'comentó'],
-  DISMISSED: ['x', '--faint', 'review descartada'],
+  APPROVED: ['check', '--ok', 'r_APPROVED'],
+  CHANGES_REQUESTED: ['x', '--bad', 'r_CHANGES_REQUESTED'],
+  COMMENTED: ['comment', '--muted', 'r_COMMENTED'],
+  DISMISSED: ['x', '--faint', 'r_DISMISSED'],
 };
 function people(p) {
   const seen = new Set();
   const done = arr(p.reviews).filter(r => r && r.login && !seen.has(r.login) && seen.add(r.login));
   const pend = arr(p.pending).filter(r => r && r.login && !seen.has(r.login));
   const all = [
-    ...done.map(r => { const st = REVIEW_STATE[r.state] || REVIEW_STATE.COMMENTED; return avatar(r.login, r.avatar, {state: st, title: `${r.login} ${st[2]}`}); }),
-    ...pend.map(r => avatar(r.login, r.avatar, {cls: 'pend', title: `Falta ${r.login === S.data?.login ? 'tu review' : 'la review de ' + r.login}`})),
+    ...done.map(r => { const st = REVIEW_STATE[r.state] || REVIEW_STATE.COMMENTED; return avatar(r.login, r.avatar, {state: st, title: t(st[2], r.login)}); }),
+    ...pend.map(r => avatar(r.login, r.avatar, {cls: 'pend', title: r.login === S.data?.login ? t('pendYou') : t('pendOf', r.login)})),
   ];
   const extra = all.length > 3 ? `<span class="more">+${all.length - 3}</span>` : '';
   return `<span class="people c-people z">${all.slice(0, 3).join('')}${extra}</span>`;
@@ -390,7 +450,7 @@ function people(p) {
 function threads(p) {
   const total = Number(p.threads), open = Number(p.unresolvedThreads) || 0;
   if (!(total > 0)) return '<span class="c-thr"></span>';
-  const tip = open ? `${open} de ${total} hilos sin resolver` : `${total} hilos, todos resueltos`;
+  const tip = open ? t('thrOpen', open, total) : t('thrDone', total);
   return `<span class="thr c-thr z ${open ? 'open' : ''}" title="${esc(tip)}">${ico('comment')}${total - open}/${total}</span>`;
 }
 const dash = cls => `<span class="${cls}"><i class="dash"></i></span>`;
@@ -398,11 +458,11 @@ const status = (cls, [icon, color, tip], href = '') => href
   ? `<a class="st ${cls} z" style="--c:var(${color})" href="${href}" target="_blank" rel="noopener" title="${esc(tip)}" aria-label="${esc(tip)}">${ico(icon)}</a>`
   : `<span class="st ${cls} z" style="--c:var(${color})" title="${esc(tip)}" aria-label="${esc(tip)}">${ico(icon)}</span>`;
 const CI = {
-  SUCCESS: ['check', '--ok', 'CI en verde'],
-  FAILURE: ['x', '--bad', 'CI falló'],
-  ERROR: ['x', '--bad', 'CI con error'],
-  PENDING: ['dot', '--warn', 'CI corriendo'],
-  EXPECTED: ['dot', '--warn', 'CI por partir'],
+  SUCCESS: ['check', '--ok', t('ci_SUCCESS')],
+  FAILURE: ['x', '--bad', t('ci_FAILURE')],
+  ERROR: ['x', '--bad', t('ci_ERROR')],
+  PENDING: ['dot', '--warn', t('ci_PENDING')],
+  EXPECTED: ['dot', '--warn', t('ci_EXPECTED')],
 };
 function ci(p) {
   const c = CI[p.checks];
@@ -410,31 +470,31 @@ function ci(p) {
   const failed = arr(p.failedChecks).filter(Boolean);
   return status('c-ci', [c[0], c[1], failed.length ? `${c[2]}: ${failed.join(', ')}` : c[2]], safeUrl(p.url) ? `${safeUrl(p.url)}/checks` : '');
 }
-const DECISION = {APPROVED: ['check', '--ok', 'Aprobado'], CHANGES_REQUESTED: ['x', '--bad', 'Cambios pedidos']};
-const decision = p => DECISION[p.decision] ? status('c-dec', DECISION[p.decision]) : `<span class="c-dec" title="${p.decision === 'REVIEW_REQUIRED' ? 'Falta review' : 'Sin review'}"><i class="dash"></i></span>`;
+const DECISION = {APPROVED: ['check', '--ok', t('approved')], CHANGES_REQUESTED: ['x', '--bad', t('changesReq')]};
+const decision = p => DECISION[p.decision] ? status('c-dec', DECISION[p.decision]) : `<span class="c-dec" title="${p.decision === 'REVIEW_REQUIRED' ? t('reviewMissing') : t('noReview')}"><i class="dash"></i></span>`;
 function mergeable(p, sec) {
-  if (sec.id === 'merged') return status('c-mrg', ['merge', '--merged', 'Mergeado']);
-  if (p.conflict || p.mergeState === 'DIRTY') return status('c-mrg', ['alert', '--bad', `Conflicto con ${p.baseRef || 'la base'}`]);
-  if (p.mergeState === 'BEHIND') return status('c-mrg', ['behind', '--warn', `Atrás de ${p.baseRef || 'la base'}`]);
-  if (['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].includes(p.mergeState)) return status('c-mrg', ['merge', '--ok', 'Se puede mergear']);
+  if (sec.id === 'merged') return status('c-mrg', ['merge', '--merged', t('merged')]);
+  if (p.conflict || p.mergeState === 'DIRTY') return status('c-mrg', ['alert', '--bad', t('conflictWith', p.baseRef)]);
+  if (p.mergeState === 'BEHIND') return status('c-mrg', ['behind', '--warn', t('behindOf', p.baseRef)]);
+  if (['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].includes(p.mergeState)) return status('c-mrg', ['merge', '--ok', t('mergeable')]);
   return dash('c-mrg');
 }
 function size(p) {
   const a = Number(p.additions), d = Number(p.deletions);
   if (p.additions == null || !Number.isFinite(a)) return '<span class="size c-size"></span>';
-  const files = Number.isFinite(Number(p.changedFiles)) && p.changedFiles != null ? ` en ${num.format(p.changedFiles)} archivos` : '';
-  return `<span class="size c-size z" title="${esc(num.format(a + (d || 0)) + ' líneas' + files)}">`
+  const files = Number.isFinite(Number(p.changedFiles)) && p.changedFiles != null ? p.changedFiles : null;
+  return `<span class="size c-size z" title="${esc(t('lines', num.format(a + (d || 0)), files))}">`
     + `${a ? `<span class="add">+${num.format(a)}</span>` : ''}${d ? `<span class="del">-${num.format(d)}</span>` : ''}</span>`;
 }
 function when(p, sec) {
-  const [iso, label] = sec.when === 'wait' ? [p.requestedAt || p.createdAt, 'Te pidieron review']
-    : sec.when === 'merged' ? [p.mergedAt, 'Mergeado'] : [p.updatedAt, 'Actualizado'];
+  const [iso, label] = sec.when === 'wait' ? [p.requestedAt || p.createdAt, t('requested')]
+    : sec.when === 'merged' ? [p.mergedAt, t('merged')] : [p.updatedAt, t('updated')];
   return Date.parse(iso) ? `<time class="when c-time z" data-t="${esc(iso)}" data-urgent="${sec.when === 'wait' ? 1 : ''}" datetime="${esc(iso)}" title="${esc(label + ' ' + fullDate(iso))}"></time>` : '<span class="c-time"></span>';
 }
 function flags(p, sec) {
   const out = [];
-  if (p.draft && sec.id !== 'draft') out.push(`<span class="tag">${ico('draft')}Draft</span>`);
-  if (p.stacked && p.baseRef) out.push(`<span class="tag z" title="Apilado sobre ${esc(p.baseRef)}">${ico('stack')}<code>${esc(p.baseRef)}</code></span>`);
+  if (p.draft && sec.id !== 'draft') out.push(`<span class="tag">${ico('draft')}${t('draft')}</span>`);
+  if (p.stacked && p.baseRef) out.push(`<span class="tag z" title="${esc(t('stackedOn', p.baseRef))}">${ico('stack')}<code>${esc(p.baseRef)}</code></span>`);
   const ls = arr(p.labels).filter(l => l && l.name);
   for (const l of ls.slice(0, 2)) {
     const c = /^[0-9a-f]{6}$/i.test(l.color || '') ? `style="--lc:#${l.color}"` : '';
@@ -446,36 +506,32 @@ function flags(p, sec) {
 function row(p, sec) {
   const k = keyOf(p), id = `${sec.id}|${k}`;
   return `<article class="pr row${S.sel === id ? ' sel' : ''}" data-id="${esc(id)}" data-key="${esc(k)}" data-ref="${esc(p.headRef || '')}">
-    <span>${S.seen.has(k) ? '' : '<i class="new" title="Nuevo"></i>'}</span>
+    <span>${S.seen.has(k) ? '' : `<i class="new" title="${t('new')}"></i>`}</span>
     ${avatar(p.author, p.authorAvatar)}
     <div class="body">
-      <a class="t" href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">${esc(p.title || '(sin título)')}</a>
+      <a class="t" href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">${esc(p.title || t('noTitle'))}</a>
       <div class="meta"><span>${esc(p.author)}</span><span class="sep">·</span><span title="${esc(p.repo)}">${esc(repoName(p))} #${esc(p.number)}</span>${flags(p, sec)}</div>
     </div>
     ${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
   </article>`;
 }
-const colsHead = sec => `<div class="row cols" aria-hidden="true"><span></span><span></span><span>Título</span>
-  <span class="c-people r">Reviewers</span><span class="c-thr" title="Hilos resueltos / total">${ico('comment')}</span>
+const colsHead = sec => `<div class="row cols" aria-hidden="true"><span></span><span></span><span>${t('title')}</span>
+  <span class="c-people r">${t('reviewers')}</span><span class="c-thr" title="${t('threads')}">${ico('comment')}</span>
   <span class="c-ci" title="CI">${ico('ci')}</span><span class="c-dec" title="Review">${ico('eye')}</span><span class="c-mrg" title="Mergeable">${ico('merge')}</span>
-  <span class="c-size r">Cambios</span><span class="c-time r">${WHEN_LABEL[sec.when] || 'Actualizado'}</span></div>`;
+  <span class="c-size r">${t('changes')}</span><span class="c-time r">${t(sec.when === 'wait' ? 'waitCol' : sec.when === 'merged' ? 'merged' : 'updated')}</span></div>`;
 
 /* text for Claude */
 function sectionText(sec) {
   const v = S.visible[sec.id] || {prs: [], total: 0};
-  const n = v.prs.length === v.total ? `${v.total}` : `${v.prs.length} de ${v.total}`;
-  return `## ${sec.title} (${n})\n\n` + (v.prs.map(p => p.md || `- ${p.title} ${p.url}`).join('\n') || '(ninguno)');
+  const n = v.prs.length === v.total ? `${v.total}` : t('of', v.prs.length, v.total);
+  return `## ${sec.title} (${n})\n\n` + (v.prs.map(p => p.md || `- ${p.title} ${p.url}`).join('\n') || t('none'));
 }
-function filterNote() {
-  const bits = [];
-  if (S.q) bits.push(`texto "${S.q}"`);
-  return bits.length ? `\n\nFiltrado por ${bits.join(' y ')}.` : '';
-}
+const filterNote = () => S.q ? '\n\n' + t('filteredBy', S.q) : '';
 const hiddenRepos = () => arr(S.data?.repos).filter(r => r.hidden).map(r => r.repo);
 // why: same header as /inbox.md, so Claude knows when a repo was left out on purpose.
 function allText() {
   const hidden = hiddenRepos();
-  return [`# PRs de @${S.data?.login}${filterNote()}`, ...(hidden.length ? [`Repos ocultos: ${hidden.join(', ')}.`] : []), ...SECTIONS.map(sectionText)].join('\n\n') + '\n';
+  return [`# ${t('inboxOf', S.data?.login)}${filterNote()}`, ...(hidden.length ? [t('hiddenRepos', hidden.join(', '))] : []), ...SECTIONS.map(sectionText)].join('\n\n') + '\n';
 }
 
 /* filters */
@@ -493,11 +549,11 @@ function render() {
   const html = SECTIONS.map(sec => {
     const all = arr(sec.get(d)).filter(Boolean), prs = all.filter(matches);
     S.visible[sec.id] = {prs, total: all.length};
-    const n = filtering && all.length !== prs.length ? `${prs.length} de ${all.length}` : `${prs.length}`;
-    const copyBtn = prs.length ? `<button class="btn" type="button" data-copy-sec="${sec.id}" title="Copiar la sección como texto">${ico('copy')}Copiar</button>` : '';
+    const n = filtering && all.length !== prs.length ? t('of', prs.length, all.length) : `${prs.length}`;
+    const copyBtn = prs.length ? `<button class="btn" type="button" data-copy-sec="${sec.id}" title="${t('copySecTip')}">${ico('copy')}${t('copy')}</button>` : '';
     const head = `${ico('chev', 'chev')}<h2 id="h-${sec.id}">${sec.title}</h2><span class="n">${n}</span>${copyBtn}`;
     if (!prs.length) {
-      const msg = filtering && all.length ? '<div class="empty">Ningún PR coincide con el filtro.</div>' : '';
+      const msg = filtering && all.length ? `<div class="empty">${t('noMatch')}</div>` : '';
       return `<div class="sec" id="sec-${sec.id}"><div class="sec-h">${head}</div>${msg}</div>`;
     }
     return `<details class="sec" id="sec-${sec.id}" data-sec="${sec.id}" ${S.closed.has(sec.id) ? '' : 'open'}><summary class="sec-h">${head}</summary>`
@@ -524,7 +580,7 @@ function render() {
 function renderRepos() {
   const repos = arr(S.data?.repos), hidden = repos.filter(r => r.hidden).length;
   const btn = $('#repos-btn');
-  btn.innerHTML = `${ico('repo')}<span>${hidden ? `${repos.length - hidden} de ${repos.length} repos` : 'Todos los repos'}</span>${ico('down')}`;
+  btn.innerHTML = `${ico('repo')}<span>${hidden ? t('someRepos', repos.length - hidden, repos.length) : t('allRepos')}</span>${ico('down')}`;
   btn.toggleAttribute('data-filtered', hidden > 0);
   $('#repo-list').innerHTML = repos.map(r => {
     const [owner, name] = r.repo.includes('/') ? r.repo.split('/') : ['', r.repo];
@@ -534,7 +590,7 @@ function renderRepos() {
 }
 async function setHidden(hidden) {
   try {
-    const r = await fetch('/api/hidden', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({hidden})});
+    const r = await fetch(`/api/hidden?lang=${LANG}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({hidden})});
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     if (!d?.login) return;
@@ -542,7 +598,7 @@ async function setHidden(hidden) {
     store.set('snap', d);
     render();
   } catch (e) {
-    toast(`No pude guardar los repos: <code>${esc(e.message)}</code>`);
+    toast(`${t('saveReposFail')} <code>${esc(e.message)}</code>`);
     render();
   }
 }
@@ -556,23 +612,22 @@ function renderChrome() {
   if (safeUrl(d?.avatarUrl) && me.getAttribute('src') !== d.avatarUrl) { me.src = d.avatarUrl; me.alt = d.login || ''; }
   const b = $('#banner');
   let msg = '';
-  if (S.netError) msg = `No hay conexión con el server local (<code>${esc(S.netError)}</code>). Sigo intentando cada minuto.`;
-  else if (d?.error && d?.login) msg = `GitHub no respondió en el último refresco (<code>${esc(d.error)}</code>). Lo que ves es de las ${esc(new Date(d.fetchedAt * 1000).toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}))}.`;
+  if (S.netError) msg = t('noServer', `<code>${esc(S.netError)}</code>`);
+  else if (d?.error && d?.login) msg = t('staleData', `<code>${esc(d.error)}</code>`, hhmm(d.fetchedAt * 1000));
   b.hidden = !msg;
   if (msg) b.innerHTML = `${ico('alert')}<span>${msg}</span>`;
   const rl = d?.rateLimit;
   if (rl && Number.isFinite(Number(rl.remaining))) {
-    const reset = Date.parse(rl.resetAt) ? `, se renueva a las ${new Date(rl.resetAt).toLocaleTimeString('es', {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'})}` : '';
-    $('#rate').innerHTML = `<span class="${Number(rl.remaining) < 500 ? 'warn-t' : ''}">${esc(num.format(rl.remaining))} puntos de API${esc(reset)}</span>`;
+    $('#rate').innerHTML = `<span class="${Number(rl.remaining) < 500 ? 'warn-t' : ''}">${esc(t('apiPoints', num.format(rl.remaining), Date.parse(rl.resetAt) ? hhmm(Date.parse(rl.resetAt)) : ''))}</span>`;
   } else $('#rate').textContent = '';
 }
 
 function renderNoData(message) {
   $('#app').setAttribute('aria-busy', 'false');
-  $('#app').innerHTML = `<div class="sec"><div class="sec-h"><h2>Todavía no hay datos</h2>`
-    + `<span class="hint">${message ? esc(message) : 'El server está consultando GitHub.'}</span>`
-    + `<button class="btn" type="button" data-action="retry">${ico('refresh')}Reintentar</button></div></div>`;
-  $('#fresh').textContent = 'Sin datos todavía';
+  $('#app').innerHTML = `<div class="sec"><div class="sec-h"><h2>${t('noDataYet')}</h2>`
+    + `<span class="hint">${message ? esc(message) : t('serverAsking')}</span>`
+    + `<button class="btn" type="button" data-action="retry">${ico('refresh')}${t('retry')}</button></div></div>`;
+  $('#fresh').textContent = t('noDataShort');
 }
 
 /* live bits */
@@ -584,7 +639,7 @@ function tick() {
   }
   if (S.data?.fetchedAt) {
     const iso = new Date(S.data.fetchedAt * 1000).toISOString();
-    $('#fresh').textContent = `Datos de GitHub ${ago(iso)}`;
+    $('#fresh').textContent = t('fetched', ago(iso));
     $('#fresh').title = fullDate(iso);
   }
 }
@@ -611,7 +666,8 @@ function setFavicon(n) {
 /* data */
 function notifyNew(prev, next) {
   if (!prev || !S.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
-  for (const [id, title] of NOTIFY_ON) {
+  for (const id of NOTIFY_ON) {
+    const title = t('n_' + id);
     const get = SECTIONS.find(s => s.id === id).get;
     const before = new Set(arr(get(prev)).map(keyOf));
     for (const p of arr(get(next))) {
@@ -640,7 +696,7 @@ async function load(force = false) {
   document.body.classList.add('loading');
   clearTimeout(S.retryTimer);
   try {
-    const r = await fetch('/api/data' + (force ? '?force=1' : ''), {cache: 'no-store'});
+    const r = await fetch(`/api/data?lang=${LANG}${force ? '&force=1' : ''}`, {cache: 'no-store'});
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     S.netError = null;
@@ -656,9 +712,9 @@ async function load(force = false) {
     S.cached = false;
     store.set('snap', d);
     render();
-    if (force) toast('Al día');
+    if (force) toast(t('upToDate'));
   } catch (e) {
-    S.netError = e.message || 'error de red';
+    S.netError = e.message || t('netErr');
     if (S.data) renderChrome(); else renderNoData(S.netError);
   } finally {
     S.loading = false;
@@ -677,8 +733,8 @@ function toast(html) {
   toastTimer = setTimeout(() => t.classList.remove('on'), 1800);
 }
 async function copy(text, what) {
-  try { await navigator.clipboard.writeText(text); toast(`Copiado: ${what ? esc(what) : `<code>${esc(text)}</code>`}`); }
-  catch { toast('No pude copiar al portapapeles'); }
+  try { await navigator.clipboard.writeText(text); toast(t('copied', what ? esc(what) : `<code>${esc(text)}</code>`)); }
+  catch { toast(t('copyFail')); }
 }
 function effectiveTheme() {
   return document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -687,11 +743,11 @@ function paintTools() {
   $('#theme').innerHTML = ico(effectiveTheme() === 'dark' ? 'sun' : 'moon');
   $('#refresh').innerHTML = ico('refresh');
   $('#help-btn').innerHTML = ico('keyboard');
-  $('#copy-all').innerHTML = `${ico('copy')}<span>Copiar todo</span>`;
+  $('#copy-all').innerHTML = `${ico('copy')}<span>${t('copyAll')}</span>`;
   const nb = $('#notify');
   nb.innerHTML = ico(S.notify ? 'bell' : 'bellOff');
   nb.setAttribute('aria-pressed', String(S.notify));
-  const label = S.notify ? 'Notificaciones de escritorio activadas' : 'Activar notificaciones de escritorio';
+  const label = t(S.notify ? 'notifOn' : 'notifOff');
   nb.setAttribute('aria-label', label); nb.title = label;
 }
 function toggleTheme() {
@@ -701,15 +757,15 @@ function toggleTheme() {
   paintTools();
 }
 async function toggleNotify() {
-  if (!('Notification' in window)) return toast('Este navegador no soporta notificaciones');
+  if (!('Notification' in window)) return toast(t('notifUnsupported'));
   if (!S.notify && Notification.permission !== 'granted') {
     const perm = await Notification.requestPermission();
-    if (perm !== 'granted') return toast('El navegador bloqueó las notificaciones');
+    if (perm !== 'granted') return toast(t('notifBlocked'));
   }
   S.notify = !S.notify;
   store.set('notify', S.notify);
   paintTools();
-  toast(S.notify ? 'Te aviso cuando llegue algo nuevo' : 'Notificaciones apagadas');
+  toast(t(S.notify ? 'notifyYes' : 'notifyNo'));
 }
 function markSeen(rowEl) {
   const k = rowEl?.dataset.key;
@@ -724,7 +780,7 @@ function prOf(rowEl) {
 }
 function copyAll() {
   if (!S.data) return;
-  copy(allText(), 'toda la bandeja como texto');
+  copy(allText(), t('wholeInbox'));
 }
 
 /* selection + keys */
@@ -757,9 +813,9 @@ document.addEventListener('keydown', e => {
   if (k === 'j' || k === 'ArrowDown') { e.preventDefault(); move(1); }
   else if (k === 'k' || k === 'ArrowUp') { e.preventDefault(); move(-1); }
   else if (k === 'o' || (k === 'Enter' && !e.target.closest?.('a, button, summary'))) { if (r) { e.preventDefault(); r.querySelector('.t')?.click(); } }
-  else if (k === 'y') { if (p) copy(p.md, `${repoName(p)} #${p.number} como texto`); }
+  else if (k === 'y') { if (p) copy(p.md, t('asText', `${repoName(p)} #${p.number}`)); }
   else if (k === 'Y') copyAll();
-  else if (k === 'c') { if (r) r.dataset.ref ? copy(r.dataset.ref) : toast('Este PR no trae rama'); }
+  else if (k === 'c') { if (r) r.dataset.ref ? copy(r.dataset.ref) : toast(t('noBranch')); }
   else if (k === 'g') { if (p) copy(`gh pr checkout ${p.number} -R ${p.repo}`); }
   else if (k === '/') { e.preventDefault(); $('#q').focus(); $('#q').select(); }
   else if (k === 'r') load(true);
@@ -784,7 +840,7 @@ document.addEventListener('click', e => {
   if (cs) {
     e.preventDefault();
     const sec = SECTIONS.find(s => s.id === cs.dataset.copySec);
-    copy(sectionText(sec) + filterNote() + '\n', `${sec.title} como texto`);
+    copy(sectionText(sec) + filterNote() + '\n', t('asText', sec.title));
     return;
   }
   if (t.closest('[data-show-all]')) { setHidden([]); return; }
@@ -814,6 +870,12 @@ document.addEventListener('visibilitychange', () => {
 });
 addEventListener('focus', () => { if (Date.now() - S.lastLoad > FOCUS_MIN_GAP_MS) load(); });
 
+for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+for (const el of document.querySelectorAll('[data-i18n-attr]')) for (const pair of el.dataset.i18nAttr.split(',')) { const [a, k] = pair.split(':'); el.setAttribute(a, t(k)); }
+$('#keys').innerHTML = [['j k', 'move'], ['o Enter', 'open'], ['y', 'copy'], ['Y', 'copyAll'], ['c', 'branch'], ['g', 'checkout'], ['/', 'filter'],
+  ['r', 'refresh'], ['t', 'theme'], ['Esc', 'esc'], ['?', 'help']]
+  .map(([keys, k]) => `<dt>${keys.split(' ').map(x => `<kbd>${esc(x)}</kbd>`).join('')}</dt><dd>${t('k_' + k)}</dd>`).join('');
+$('#curl').textContent = `curl -s ${location.host}/inbox.md`;
 paintTools();
 // why: paint the last snapshot instantly; a stale server cache costs 2-5s of gh calls on every F5.
 const snap = store.get('snap', null);
