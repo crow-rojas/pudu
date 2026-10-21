@@ -181,9 +181,6 @@ div.sec .sec-h{cursor:default}
 .pr:is(.up,.down){--rail:linear-gradient(color-mix(in srgb,var(--faint) 60%,transparent),color-mix(in srgb,var(--faint) 60%,transparent));background-image:var(--rail);background-repeat:no-repeat;background-position:12px 0;background-size:2px 100%}
 .pr.up:not(.down){background-size:2px 50%}
 .pr.down:not(.up){background-position:12px 100%;background-size:2px 50%}
-/* why: your own sections have no author column, so the title takes its room instead of leaving a gap. */
-.own :is(.row > .body, .cols > .c-title){grid-column:2 / span 2}
-.own .c-av{display:none}
 .av{position:relative;flex:none;width:22px;height:22px}
 .av img,.av .ini{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);object-fit:cover}
 .av .ini{font:650 10px/1 var(--font);color:var(--muted);text-transform:uppercase}
@@ -745,7 +742,7 @@ function row(p, sec, depth = 0, down = false) {
   const summary = st.length ? `<span class="sr">. ${esc(st.map(s => s.label).join(', '))}</span>` : '';
   return `<article class="pr row${S.sel === id ? ' sel' : ''}${depth ? ' up' : ''}${down ? ' down' : ''}" data-id="${esc(id)}" data-key="${esc(k)}" data-ref="${esc(p.headRef || '')}">
     <span class="c-new">${dot(p)}</span>
-    ${sec.mine ? '<span class="c-av"></span>' : avatar(p.author, p.authorAvatar, {cls: 'c-av'})}
+    ${avatar(p.author, p.authorAvatar, {cls: 'c-av'})}
     <div class="body">
       <a class="t" href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">${esc(p.title || t('noTitle'))}${summary}</a>
       <div class="meta"><span class="num">#${esc(p.number)}</span><span class="repo" title="${esc(p.repo)}">${esc(repoName(p))}</span>`
@@ -820,7 +817,7 @@ function render() {
     const head = `${ico('chev', 'chev')}<h2 id="h-${esc(sec.id)}">${esc(sec.title)}</h2><span class="n">${n}</span>${hint}`
       + `<button class="btn" type="button" data-copy-sec="${esc(sec.id)}" title="${t('copySecTip')}">${ico('copy')}${t('copy')}</button>`;
     const err = sec.error ? `<p class="sec-err">${ico('alert')}<span title="${esc(sec.error)}">${esc(sec.error)}</span></p>` : '';
-    return `<details class="sec${sec.mine ? ' own' : ''}" id="sec-${esc(sec.id)}" data-sec="${esc(sec.id)}"${sec.collapsed ? ' data-collapsed' : ''} ${isClosed(sec) ? '' : 'open'}><summary class="sec-h">${head}</summary>`
+    return `<details class="sec" id="sec-${esc(sec.id)}" data-sec="${esc(sec.id)}"${sec.collapsed ? ' data-collapsed' : ''} ${isClosed(sec) ? '' : 'open'}><summary class="sec-h">${head}</summary>`
       + err + (prs.length ? colsHead(sec) + stackOrder(prs).map(([p, depth], i, all) => row(p, sec, depth, (all[i + 1]?.[1] || 0) > 0)).join('') : '') + '</details>';
   }).join('');
   if (empty.length) html += `<p class="empties">${t(filtering ? 'noMatchIn' : 'nothingIn')} ${empty.join('<span aria-hidden="true"> · </span>')}</p>`;
