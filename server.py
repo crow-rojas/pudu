@@ -149,6 +149,12 @@ def slim(node, me=None):
   rollup = dig(commit, "commit", "statusCheckRollup")
   default = dig(repo, "defaultBranchRef", "name")
   threads = nodes(node, "reviewThreads")
+  decision = node.get("reviewDecision")
+  # why: re-requesting review keeps reviewDecision at CHANGES_REQUESTED but drops that reviewer from
+  # latestReviews; once no change request is left there, the move is the reviewer's, not yours.
+  if decision == "CHANGES_REQUESTED" and nodes(node, "reviewRequests") and not any(
+    r.get("state") == "CHANGES_REQUESTED" for r in nodes(node, "latestReviews")):
+    decision = "REVIEW_REQUIRED"
   return {
     "key": f"{repo.get('nameWithOwner')}#{node.get('number')}",
     "repo": repo.get("nameWithOwner"),
@@ -167,7 +173,7 @@ def slim(node, me=None):
     "additions": node.get("additions"),
     "deletions": node.get("deletions"),
     "changedFiles": node.get("changedFiles"),
-    "decision": node.get("reviewDecision"),
+    "decision": decision,
     "checks": dig(rollup, "state"),
     # why: a matrix job repeats the same check name; the UI only needs it once.
     "failedChecks": list(dict.fromkeys(
@@ -996,7 +1002,8 @@ def selftest():
       {"requestedReviewer": {"__typename": "User", "login": "me", "avatarUrl": "m"}},
       {"requestedReviewer": None}, {"requestedReviewer": {}},
     ]},
-    "latestReviews": {"nodes": [{"state": "APPROVED", "author": {"login": "a", "avatarUrl": "x"}}, {"state": "COMMENTED", "author": None}]},
+    "latestReviews": {"nodes": [{"state": "APPROVED", "author": {"login": "a", "avatarUrl": "x"}}, {"state": "COMMENTED", "author": None},
+                                {"state": "CHANGES_REQUESTED", "author": {"login": "b", "avatarUrl": "y"}}]},
     "timelineItems": {"nodes": [
       {"createdAt": "T1", "requestedReviewer": {"__typename": "User", "login": "me"}},
       {"createdAt": "T2", "requestedReviewer": {"__typename": "Team"}},
@@ -1007,7 +1014,7 @@ def selftest():
   p = slim(node, "me")
   assert p["bot"] and p["conflict"] and p["stacked"] and p["checks"] == "FAILURE" and p["failedChecks"] == ["lint", "ci/x"]
   assert (p["comments"], p["unresolvedThreads"], p["threads"], p["requestedAt"]) == (5, 1, 2, "T3")
-  assert p["labels"] == [{"name": "bug", "color": "d73a4a"}] and p["reviews"] == [{"login": "a", "state": "APPROVED", "avatar": "x"}]
+  assert p["labels"] == [{"name": "bug", "color": "d73a4a"}] and p["reviews"] == [{"login": "a", "state": "APPROVED", "avatar": "x"}, {"login": "b", "state": "CHANGES_REQUESTED", "avatar": "y"}]
   assert p["pending"] == [{"login": "team:devs", "avatar": None}, {"login": "me", "avatar": "m"}]
   es, en = md_line(p, "es"), md_line(p)
   assert es.startswith("- t (o/r#1) u\n  @dependabot · feat/x -> feat/base · CI falló (lint, ci/x) · cambios pedidos")
@@ -1020,6 +1027,9 @@ def selftest():
   assert "in 3 files" in md_line({**p, "changedFiles": 3}) and "(untitled)" in md_line({**p, "title": None})
   assert slim(node, "nobody")["requestedAt"] == "T2"
   assert slim({k: v for k, v in node.items() if k != "timelineItems"}, "me")["requestedAt"] is None
+  rerequested = {**node, "latestReviews": {"nodes": []}}
+  assert slim(rerequested)["decision"] == "REVIEW_REQUIRED"
+  assert slim({**rerequested, "reviewRequests": {"nodes": []}})["decision"] == "CHANGES_REQUESTED"
   assert not slim({**node, "baseRefName": "develop"})["stacked"]
   assert p["key"] == "o/r#1" and p["mergeQueue"] is None and p["autoMerge"] is False and p["stackParent"] is None
   q = slim({**node, "mergeQueueEntry": {"position": 3, "state": "QUEUED"}, "autoMergeRequest": {"enabledAt": "x"}})
