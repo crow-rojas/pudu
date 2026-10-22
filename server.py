@@ -719,7 +719,12 @@ def data(force=False, lang="en"):
     if config_account(c) != _cache["account"]:
       _cache.update(at=0.0, data=None, account=config_account(c))
     age = time.time() - _cache["at"]
-    if (force and age >= FORCE_MIN_SECONDS) or age > CACHE_SECONDS:
+    rl = (_cache["data"] or {}).get("rateLimit") or {}
+    # why: a refresh the remaining quota can't pay for only earns an error; serve the snapshot until the reset.
+    spent = (rl.get("remaining") or 0) < (rl.get("cost") or 0) and time.time() < (ts(rl.get("resetAt")) or 0)
+    if spent:
+      _cache.update(error="GitHub rate limit nearly spent, waiting for the reset", errorKind="rate_limit")
+    elif (force and age >= FORCE_MIN_SECONDS) or age > CACHE_SECONDS:
       try:
         d = fetch()
         # why: an account switch during the fetch mixed both accounts' searches; drop it and refetch next call.
@@ -1470,6 +1475,13 @@ def selftest():
     assert _cache["data"] is None
     g["fetch"] = ok_fetch
     CONFIG.write_text(json.dumps({"future": 1, "account": {"host": "ghe.acme.dev", "user": "demo-work"}}))
+    # a snapshot whose quota can't pay for another refresh waits for the reset instead of calling gh.
+    n, low = len(calls), lambda dt: {**out, "rateLimit": {"cost": 22, "remaining": 5, "resetAt": iso_at(time.time() + dt)}}
+    _cache.update(at=0.0, data=low(600), account=config_account(read_config()))
+    d = data(True)
+    assert len(calls) == n and d["errorKind"] == "rate_limit" and d["rateLimit"]["remaining"] == 5
+    _cache.update(at=0.0, data=low(-60))
+    assert data(True)["error"] is None and len(calls) == n + 1
 
     # MCP over stdio: both eras, notifications unanswered, tool failures as isError, nothing but JSON-RPC out.
     import io
