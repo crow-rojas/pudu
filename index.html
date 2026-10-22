@@ -368,6 +368,7 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
 <script>
 'use strict';
 const REFRESH_MS = 60_000;
+const HIDDEN_REFRESH_MS = 5 * 60_000;
 const FOCUS_MIN_GAP_MS = 15_000;
 const $ = s => document.querySelector(s);
 
@@ -1398,8 +1399,9 @@ paintTools();
 const snap = store.get('snap', null);
 if (snap?.login) { S.data = snap; S.cached = true; render(); }
 load();
-// why: keep polling in background tabs; that's when desktop notifications matter.
-setInterval(load, REFRESH_MS);
+// why: keep polling in background tabs, that's when desktop notifications matter, but slower: a forgotten tab
+// shouldn't spend the GitHub quota at the pace of one being read. Showing the tab again loads at once.
+setInterval(() => { if (!document.hidden || Date.now() - S.lastLoad >= HIDDEN_REFRESH_MS) load(); }, REFRESH_MS);
 setInterval(tick, 20_000);
 </script>
 </body>
