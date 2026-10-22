@@ -62,6 +62,9 @@ All notable changes to Pudú are documented here. The format is based on
 
 ### Fixed
 
+- A PR whose CI is green no longer shows red because of a stale run: when a check name has several
+  runs (a re-run, or one cancelled by a concurrency group), only the latest counts, as in GitHub's
+  required checks. A cancelled latest run still counts as a failure.
 - Re-running `install.sh` no longer stops a working service when a check fails, retries launchd
   bootstrap while the old agent shuts down, refuses to install when the port is taken, honors `PORT`,
   and works from paths with spaces.

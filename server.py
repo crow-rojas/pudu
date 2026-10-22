@@ -45,8 +45,8 @@ fragment pr on PullRequest {
   labels(first: 20) { nodes { name color } }
   comments { totalCount }
   reviewThreads(first: 100) { nodes { isResolved comments { totalCount } } }
-  commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 50) { nodes {
-    ... on CheckRun { name conclusion } ... on StatusContext { context state }
+  commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 50) { totalCount nodes {
+    ... on CheckRun { name conclusion startedAt } ... on StatusContext { context state }
   } } } } } }
   reviewRequests(first: 20) { nodes { requestedReviewer {
     __typename ... on User { login avatarUrl } ... on Bot { login avatarUrl }
@@ -142,11 +142,33 @@ def reviewer(r):
   return {"login": r.get("login"), "avatar": r.get("avatarUrl")}
 
 
+# why: a re-run or a run cancelled by a concurrency group leaves several contexts per name, and GitHub's
+# rollup counts the stale ones. Like required checks, only the latest of each name counts; a queued run has
+# no startedAt yet and is the newest. This also folds matrix jobs that repeat a name.
+def latest_checks(rollup):
+  latest = {}
+  for c in sorted(nodes(rollup, "contexts"), key=lambda c: c.get("startedAt") or "~"):
+    if c.get("name") or c.get("context"):
+      latest[c.get("name") or c.get("context")] = c
+  return list(latest.values())
+
+
+def ci_state(rollup, checks):
+  states = [c.get("conclusion") or c.get("state") for c in checks]
+  # why: past the fetched page a failure could hide, so the rollup stays the safer answer.
+  if not states or (dig(rollup, "contexts", "totalCount") or 0) > len(nodes(rollup, "contexts")):
+    return dig(rollup, "state")
+  if any(s in FAILED for s in states):
+    return "FAILURE"
+  return "PENDING" if any(s in (None, "PENDING", "EXPECTED") for s in states) else "SUCCESS"
+
+
 def slim(node, me=None):
   repo = node.get("repository") or {}
   author = node.get("author") or {"login": "ghost", "__typename": "User"}
   commit = (nodes(node, "commits") or [{}])[0]
   rollup = dig(commit, "commit", "statusCheckRollup")
+  checks = latest_checks(rollup)
   default = dig(repo, "defaultBranchRef", "name")
   threads = nodes(node, "reviewThreads")
   decision = node.get("reviewDecision")
@@ -174,12 +196,8 @@ def slim(node, me=None):
     "deletions": node.get("deletions"),
     "changedFiles": node.get("changedFiles"),
     "decision": decision,
-    "checks": dig(rollup, "state"),
-    # why: a matrix job repeats the same check name; the UI only needs it once.
-    "failedChecks": list(dict.fromkeys(
-      c.get("name") or c.get("context") for c in nodes(rollup, "contexts")
-      if (c.get("conclusion") or c.get("state")) in FAILED
-    )),
+    "checks": ci_state(rollup, checks),
+    "failedChecks": [c.get("name") or c.get("context") for c in checks if (c.get("conclusion") or c.get("state")) in FAILED],
     "mergeState": node.get("mergeStateStatus"),
     "conflict": node.get("mergeable") == "CONFLICTING",
     "baseRef": node.get("baseRefName"),
@@ -739,7 +757,7 @@ query($owner: String!, $name: String!, $number: Int!, $requested: Boolean!) {
   repository(owner: $owner, name: $name) { pullRequest(number: $number) {
     ...pr
     detailChecks: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
-      ... on CheckRun { name conclusion detailsUrl } ... on StatusContext { context state targetUrl }
+      ... on CheckRun { name conclusion startedAt detailsUrl } ... on StatusContext { context state targetUrl }
     } } } } } }
     openThreads: reviewThreads(first: 100) { nodes { isResolved path line originalLine
       comments(first: 1) { nodes { author { login } body } }
@@ -781,10 +799,10 @@ def pr_md(ref, lang="en"):
       p["requestedVia"] = requested_via(p, me, False)
       link_stacks(_cache["data"] or {}, [p])
     rollup = dig((nodes(node, "detailChecks") or [{}])[0], "commit", "statusCheckRollup")
-    checks = list(dict.fromkeys(
-      (c.get("name") or c.get("context"), c.get("detailsUrl") or c.get("targetUrl")) for c in nodes(rollup, "contexts")
+    checks = [
+      (c.get("name") or c.get("context"), c.get("detailsUrl") or c.get("targetUrl")) for c in latest_checks(rollup)
       if (c.get("conclusion") or c.get("state")) in FAILED
-    ))
+    ]
     threads = [t for t in nodes(node, "openThreads") if t.get("isResolved") is False]
   if not p:
     return 404, s["notfound"].format(key)
@@ -1045,6 +1063,15 @@ def selftest():
   assert "feat/b -> feat/a · on top of #1 ·" in md_line(b) and "sobre #1" in md_line(b, "es")
   bare = slim({"number": 9, "repository": None, "author": None, "commits": None, "comments": None})
   assert bare["author"] == "ghost" and bare["checks"] is None and bare["failedChecks"] == [] and not bare["stacked"]
+  def ci(state, *runs, total=None):
+    ctx = [{"name": n, "conclusion": c, "startedAt": t} for n, c, t in runs]
+    p = slim({**node, "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": state, "contexts": {"totalCount": total or len(ctx), "nodes": ctx}}}}]}})
+    return p["checks"], p["failedChecks"]
+  assert ci("FAILURE", ("style", "CANCELLED", "T1"), ("style", "SUCCESS", "T2"), ("lint", "SUCCESS", "T1")) == ("SUCCESS", [])
+  assert ci("FAILURE", ("style", "SUCCESS", "T1"), ("style", "CANCELLED", "T2")) == ("FAILURE", ["style"])
+  assert ci("SUCCESS", ("style", "FAILURE", "T1"), ("style", None, None)) == ("PENDING", [])
+  assert ci("PENDING", ("classify", None, "T1"), ("lint", "SUCCESS", "T1")) == ("PENDING", [])
+  assert ci("FAILURE", ("style", "SUCCESS", "T1"), total=60) == ("FAILURE", [])
 
   clean = {**p, "decision": None, "checks": "SUCCESS", "conflict": False, "mergeState": "CLEAN", "unresolvedThreads": 0, "reviews": []}
   assert bucket(p) == "returned" and bucket({**p, "draft": True}) == "draft"
@@ -1243,7 +1270,8 @@ def selftest():
     **human, "url": "https://ghe.x/o/r/pull/1", "reviewRequests": node["reviewRequests"],
     "detailChecks": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": [
       {"name": "lint", "conclusion": "FAILURE", "detailsUrl": "https://ci/1"}, {"name": "lint", "conclusion": "FAILURE", "detailsUrl": "https://ci/1"},
-      {"context": "ci/x", "state": "ERROR", "targetUrl": None}, {"name": "ok", "conclusion": "SUCCESS"}]}}}}]},
+      {"context": "ci/x", "state": "ERROR", "targetUrl": None}, {"name": "ok", "conclusion": "SUCCESS"},
+      {"name": "style", "conclusion": "CANCELLED", "startedAt": "T1"}, {"name": "style", "conclusion": "SUCCESS", "startedAt": "T2"}]}}}}]},
     "openThreads": {"nodes": [{"isResolved": True, "path": "done.py", "line": 1}] + [
       {"isResolved": False, "path": "a.py", "line": None, "originalLine": i, "comments": {"nodes": [{"author": {"login": "rev"}, "body": "x\n" * 400}]}}
       for i in range(22)]},
