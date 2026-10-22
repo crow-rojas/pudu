@@ -36,7 +36,7 @@ FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"}
 NEW_FIELDS = "mergeQueueEntry { position state } autoMergeRequest { enabledAt }"
 FRAGMENT = """
 fragment pr on PullRequest {
-  number title url isDraft createdAt updatedAt mergedAt additions deletions changedFiles
+  id number title url isDraft createdAt updatedAt mergedAt additions deletions changedFiles
   reviewDecision mergeable mergeStateStatus baseRefName headRefName headRefOid isCrossRepository
   viewerLatestReview { commit { oid } }
   mergeQueueEntry { position state } autoMergeRequest { enabledAt }
@@ -44,7 +44,7 @@ fragment pr on PullRequest {
   author { __typename login avatarUrl }
   labels(first: 20) { nodes { name color } }
   comments { totalCount }
-  reviewThreads(first: 100) { nodes { isResolved comments(last: 1) { totalCount nodes { author { login } } } } }
+  reviewThreads(first: 100) { nodes { isResolved comments { totalCount } } }
   commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 50) { totalCount nodes {
     ... on CheckRun { name conclusion startedAt } ... on StatusContext { context state }
   } } } } } }
@@ -57,6 +57,11 @@ fragment pr on PullRequest {
     nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { __typename ... on User { login } } } }
   }
 }
+"""
+THREADS_QUERY = """
+query { nodes(ids: %s) { ... on PullRequest { id
+  reviewThreads(first: 100) { nodes { isResolved comments(last: 1) { totalCount nodes { author { login } } } } }
+} } }
 """
 QUERY = """
 query($q: String!, $n: Int!, $requested: Boolean!) {
@@ -358,6 +363,25 @@ def search(q, n, requested=False):
   return graphql(QUERY, q=q, n=n, requested=requested)
 
 
+# why: each thread's last comment inside a 100-PR search costs ~100 points per refresh, enough to drain the
+# hourly limit in minutes; asked only for your PRs that open threads alone send back, it costs ~1 point each.
+def last_words(mine_raw):
+  me = dig(mine_raw, "viewer", "login")
+  ids = []
+  for n in nodes(mine_raw, "search"):
+    p = n.get("id") and slim(n, me)
+    if p and bucket(p) == "returned" and bucket({**p, "threadsAwaitingAuthor": 0}) == "waiting":
+      ids.append(n["id"])
+  if not ids:
+    return
+  try:
+    got = {n["id"]: n["reviewThreads"] for n in nodes(graphql(THREADS_QUERY % json.dumps(ids))) if n.get("id")}
+  except Exception:  # why: without the last comments, open threads stay your move, as before this lookup existed.
+    return
+  for n in nodes(mine_raw, "search"):
+    n["reviewThreads"] = got.get(n.get("id"), n.get("reviewThreads"))
+
+
 DEFAULT_HOST = os.environ.get("GH_HOST") or "github.com"
 DEMO_ACCOUNTS = [{"host": "github.com", "user": "crow-demo", "active": True}, {"host": "ghe.acme.dev", "user": "demo-work", "active": True}]
 HOST = re.compile(r"[A-Za-z0-9.-]{1,253}(:\d{1,5})?")
@@ -576,6 +600,7 @@ def fetch():
     ]
     extra = [(s, pool.submit(custom, section_query(s["query"]))) for s in sections]
     accounts = pool.submit(gh_accounts)
+    last_words(jobs[1].result())
     d = build(*(j.result() for j in jobs), [(s, *j.result()) for s, j in extra])
   host = (config_account(c) or {}).get("host") or DEFAULT_HOST
   return {**d, "accounts": accounts.result() or [{"host": host, "user": d["login"], "active": True}]}
@@ -1096,6 +1121,27 @@ def selftest():
   assert bucket({**clean, "reviews": [{"state": "APPROVED"}]}) == "approved"
   assert bucket({**clean, "reviews": [{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}]}) == "returned"
   assert bucket({**clean, "decision": "REVIEW_REQUIRED", "reviews": [{"state": "APPROVED"}]}) == "waiting"
+
+  # last_words asks only about PRs that open threads alone send back, and leaves them yours if the lookup fails.
+  lone = lambda: {**node, "id": "P1", "reviewDecision": None, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+                  "commits": None, "latestReviews": None}
+  mine_raw = lambda: {"viewer": {"login": "dependabot"}, "search": {"nodes": [lone(), {**node, "id": "P2"}]}}
+  calls = []
+  g["graphql"] = lambda q, **v: calls.append(q) or {"nodes": [{"id": "P1", "reviewThreads": {"nodes": [said("rev", "dependabot")]}}]}
+  r = mine_raw()
+  last_words(r)
+  assert len(calls) == 1 and '["P1"]' in calls[0] and bucket(slim(r["search"]["nodes"][0], "dependabot")) == "waiting"
+  last_words(r)
+  assert len(calls) == 1
+  last_words({"viewer": {"login": "dependabot"}, "search": {"nodes": [{**node, "id": "P2"}]}})
+  assert len(calls) == 1
+
+  def fail(q, **v):
+    raise RuntimeError("rate limited")
+  g["graphql"], r = fail, mine_raw()
+  last_words(r)
+  assert bucket(slim(r["search"]["nodes"][0], "dependabot")) == "returned"
+  g["graphql"] = saved["graphql"]
 
   human = {
     **node, "author": {"__typename": "User", "login": "x"}, "reviewDecision": None, "mergeable": "MERGEABLE",
