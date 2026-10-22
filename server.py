@@ -44,7 +44,7 @@ fragment pr on PullRequest {
   author { __typename login avatarUrl }
   labels(first: 20) { nodes { name color } }
   comments { totalCount }
-  reviewThreads(first: 100) { nodes { isResolved comments { totalCount } } }
+  reviewThreads(first: 100) { nodes { isResolved comments(last: 1) { totalCount nodes { author { login } } } } }
   commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 50) { totalCount nodes {
     ... on CheckRun { name conclusion startedAt } ... on StatusContext { context state }
   } } } } } }
@@ -125,7 +125,7 @@ def bucket(pr):
     return "returned"
   if decision == "APPROVED":
     return "approved"
-  return "returned" if pr["unresolvedThreads"] else "waiting"
+  return "returned" if pr["threadsAwaitingAuthor"] else "waiting"
 
 
 def requested_at(node, me):
@@ -207,6 +207,9 @@ def slim(node, me=None):
     "labels": [{"name": l.get("name"), "color": l.get("color")} for l in nodes(node, "labels")],
     "comments": (dig(node, "comments", "totalCount") or 0) + sum(dig(t, "comments", "totalCount") or 0 for t in threads),
     "unresolvedThreads": sum(1 for t in threads if t.get("isResolved") is False),
+    # why: a thread whose last word is the author's waits on the reviewer; only the others are your move.
+    "threadsAwaitingAuthor": sum(1 for t in threads if t.get("isResolved") is False
+                                 and dig((nodes(t, "comments") or [{}])[-1], "author", "login") != author.get("login")),
     "threads": len(threads),
     "pending": [
       reviewer(r["requestedReviewer"]) for r in nodes(node, "reviewRequests")
@@ -1032,6 +1035,13 @@ def selftest():
   p = slim(node, "me")
   assert p["bot"] and p["conflict"] and p["stacked"] and p["checks"] == "FAILURE" and p["failedChecks"] == ["lint", "ci/x"]
   assert (p["comments"], p["unresolvedThreads"], p["threads"], p["requestedAt"]) == (5, 1, 2, "T3")
+  assert p["threadsAwaitingAuthor"] == 1  # why: no comment author known means not the PR author's.
+  said = lambda *who: {"isResolved": False, "comments": {"totalCount": len(who), "nodes": [{"author": w and {"login": w}} for w in who]}}
+  answered = lambda *ts: slim({**node, "reviewThreads": {"nodes": list(ts)}}, "me")
+  assert answered(said("rev", "dependabot"))["threadsAwaitingAuthor"] == 0
+  assert answered(said("dependabot", "rev"))["threadsAwaitingAuthor"] == 1
+  assert answered(said("dependabot", None), said("dependabot"))["threadsAwaitingAuthor"] == 1
+  assert answered(said("rev", "dependabot"))["unresolvedThreads"] == 1
   assert p["labels"] == [{"name": "bug", "color": "d73a4a"}] and p["reviews"] == [{"login": "a", "state": "APPROVED", "avatar": "x"}, {"login": "b", "state": "CHANGES_REQUESTED", "avatar": "y"}]
   assert p["pending"] == [{"login": "team:devs", "avatar": None}, {"login": "me", "avatar": "m"}]
   es, en = md_line(p, "es"), md_line(p)
@@ -1073,12 +1083,15 @@ def selftest():
   assert ci("PENDING", ("classify", None, "T1"), ("lint", "SUCCESS", "T1")) == ("PENDING", [])
   assert ci("FAILURE", ("style", "SUCCESS", "T1"), total=60) == ("FAILURE", [])
 
-  clean = {**p, "decision": None, "checks": "SUCCESS", "conflict": False, "mergeState": "CLEAN", "unresolvedThreads": 0, "reviews": []}
+  clean = {**p, "decision": None, "checks": "SUCCESS", "conflict": False, "mergeState": "CLEAN", "unresolvedThreads": 0, "threadsAwaitingAuthor": 0, "reviews": []}
   assert bucket(p) == "returned" and bucket({**p, "draft": True}) == "draft"
   assert bucket(clean) == "waiting" and bucket({**clean, "decision": "APPROVED"}) == "approved"
-  for bad in ({"decision": "CHANGES_REQUESTED"}, {"checks": "FAILURE"}, {"checks": "ERROR"}, {"conflict": True}, {"mergeState": "DIRTY"}, {"unresolvedThreads": 2}):
+  for bad in ({"decision": "CHANGES_REQUESTED"}, {"checks": "FAILURE"}, {"checks": "ERROR"}, {"conflict": True}, {"mergeState": "DIRTY"}, {"threadsAwaitingAuthor": 2}):
     assert bucket({**clean, **bad}) == "returned", bad
-  assert bucket({**clean, "decision": "APPROVED", "unresolvedThreads": 2}) == "approved"
+  assert bucket({**clean, "decision": "APPROVED", "threadsAwaitingAuthor": 2}) == "approved"
+  assert bucket({**clean, "unresolvedThreads": 1, "threadsAwaitingAuthor": 0}) == "waiting"
+  assert bucket({**clean, "unresolvedThreads": 1, "threadsAwaitingAuthor": 1}) == "returned"
+  assert bucket({**clean, "unresolvedThreads": 2, "threadsAwaitingAuthor": 1}) == "returned"
   assert bucket({**clean, "decision": "APPROVED", "checks": "FAILURE"}) == "returned"
   assert bucket({**clean, "reviews": [{"state": "APPROVED"}]}) == "approved"
   assert bucket({**clean, "reviews": [{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}]}) == "returned"
