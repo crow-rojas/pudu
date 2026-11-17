@@ -441,6 +441,12 @@ def link_stacks(d, targets=None):
   return d
 
 
+# why: oldest wait on top. A re-review waits since its head commit (updatedAt if unknown);
+# createdAt covers a missing request event.
+def wait_order(p):
+  return p["requestedAt"] or (p["rereview"] and (p["headCommittedAt"] or p["updatedAt"])) or p["createdAt"] or ""
+
+
 def build(review_raw, mine_raw, merged_raw, rereview_raw=None, custom=()):
   raws = {"review": review_raw, "mine": mine_raw, "merged": merged_raw, "rereview": rereview_raw or {}}
   me = dig(review_raw, "viewer", "login")
@@ -461,11 +467,7 @@ def build(review_raw, mine_raw, merged_raw, rereview_raw=None, custom=()):
     "fetchedAt": time.time(),
     "rateLimit": low and {**low, "cost": sum(r["cost"] for r in limits)},
     "review": {
-      # why: oldest wait on top. A re-review waits since its head commit (updatedAt if unknown);
-      # createdAt covers a missing request event.
-      "humans": sorted((p for p in review if not p["bot"]), key=lambda p: (
-        p["requestedAt"] or (p["rereview"] and (p["headCommittedAt"] or p["updatedAt"])) or p["createdAt"] or ""
-      )),
+      "humans": sorted((p for p in review if not p["bot"]), key=wait_order),
       "bots": desc((p for p in review if p["bot"]), "updatedAt"),
     },
     "mine": {k: [p for p in mine if bucket(p) == k] for k in EMPTY["mine"]},
@@ -642,6 +644,11 @@ def hidden_repos(c):
   return {r for r in h if isinstance(r, str)} if isinstance(h, list) else set()
 
 
+def human_bots(c):
+  h = c.get("humanBots")
+  return {b for b in h if isinstance(b, str)} if isinstance(h, list) else set()
+
+
 def snoozes(c):
   s = c.get("snoozed")
   return {k: v for k, v in s.items() if isinstance(v, dict) and ts(v.get("until"))} if isinstance(s, dict) else {}
@@ -678,6 +685,13 @@ def custom_sections(c):
 def view(d, c, lang="en"):
   hidden, snoozed, sleeping, accounts = hidden_repos(c), snoozes(c), {}, d.get("accounts") or []
   counts = Counter(p["repo"] for p in all_prs(d))
+  people, bots = human_bots(c), Counter(p["author"] for p in all_prs(d) if p["bot"] and p["author"])
+  # why: a bot marked as a person is reviewed like one, so it waits in "Needs your review" and counts and notifies there.
+  promoted = [p for p in d["review"]["bots"] if p["author"] in people]
+  review = {
+    "humans": sorted(d["review"]["humans"] + promoted, key=wait_order),
+    "bots": [p for p in d["review"]["bots"] if p["author"] not in people],
+  }
 
   def keep(prs):
     out = []
@@ -693,13 +707,14 @@ def view(d, c, lang="en"):
 
   return {
     **d,
-    "review": {k: keep(d["review"][k]) for k in EMPTY["review"]},
+    "review": {k: keep(review[k]) for k in EMPTY["review"]},
     "mine": {k: keep(d["mine"][k]) for k in EMPTY["mine"]},
     "merged": keep(d["merged"]),
     "custom": [{**s, "prs": keep(s["prs"])} for s in d["custom"]],
     # why: after the lists on purpose; keep() above is what fills `sleeping`.
     "snoozed": sorted(sleeping.values(), key=lambda p: p["snoozedUntil"]),
     "repos": [{"repo": r, "count": counts[r], "hidden": r in hidden} for r in sorted(set(counts) | hidden)],
+    "bots": [{"login": b, "count": bots[b], "human": b in people} for b in sorted(set(bots) | people)],
     "settings": {"staleHours": stale_hours(c)},
     "accounts": accounts,
     "account": current_account(c, accounts),
@@ -754,6 +769,14 @@ def post_hidden(body):
   return True
 
 
+def post_bots(body):
+  bots = body["humanBots"]
+  if not isinstance(bots, list) or len(bots) > 1000 or not all(isinstance(b, str) and 0 < len(b) <= 100 for b in bots):
+    return False
+  update_config(lambda c: c.update(humanBots=sorted(set(bots))))
+  return True
+
+
 def post_snooze(body):
   key, until = body["key"], body.get("until")
   if not (isinstance(key, str) and KEY.fullmatch(key) and (until is None or isinstance(until, str) and len(until) < 40 and ts(until))):
@@ -782,7 +805,7 @@ def post_account(body):
   return True
 
 
-POSTS = {"/api/hidden": post_hidden, "/api/snooze": post_snooze, "/api/account": post_account}
+POSTS = {"/api/hidden": post_hidden, "/api/bots": post_bots, "/api/snooze": post_snooze, "/api/account": post_account}
 
 PR_QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $requested: Boolean!) {
@@ -1169,6 +1192,12 @@ def selftest():
   v = view(out, {"hidden": ["o/r", "gone/repo"]})
   assert v["review"]["humans"] == [] and v["mine"]["approved"] == [] and v["merged"] == []
   assert v["repos"] == [{"repo": "gone/repo", "count": 0, "hidden": True}, {"repo": "o/r", "count": 9, "hidden": True}]
+  # bots marked as people join "Needs your review" in wait order; configured bots stay listed while absent.
+  assert view(out, {})["bots"] == [{"login": "dependabot", "count": 1, "human": False}]
+  hb = view(out, {"humanBots": ["dependabot", "gone-bot", 3]})
+  assert hb["review"]["bots"] == [] and nums(hb["review"]["humans"]) == nums(sorted(out["review"]["humans"] + out["review"]["bots"], key=wait_order))
+  assert hb["bots"] == [{"login": "dependabot", "count": 1, "human": True}, {"login": "gone-bot", "count": 0, "human": True}]
+  assert "## Bots (0)" in inbox_md(hb) and "## Needs your review (3)" in inbox_md(hb)
   ves = view(out, {}, "es")
   assert [{k: x for k, x in p.items() if k != "md"} for p in ves["review"]["humans"]] == out["review"]["humans"]
   assert ves["review"]["humans"][0]["md"] == md_line(out["review"]["humans"][0], "es")
@@ -1431,6 +1460,12 @@ def selftest():
     assert sorted(json.loads(CONFIG.read_text())["snoozed"]) == ["gone/x#1", "o/r#5"]
     code, body = js("/api/snooze", {"key": "o/r#5", "until": None})
     assert code == 200 and json.loads(body)["snoozed"] == [] and len(json.loads(body)["mine"]["approved"]) == 1
+    for bad in ({"humanBots": [1]}, {"humanBots": "x"}, {"humanBots": ["b" * 101]}, ["x"], {}):
+      assert js("/api/bots", bad)[0] == 400, bad
+    code, body = js("/api/bots", {"humanBots": ["renovate", "dependabot", "renovate"]})
+    assert code == 200 and [b["login"] for b in json.loads(body)["bots"] if b["human"]] == ["dependabot", "renovate"]
+    assert json.loads(CONFIG.read_text())["humanBots"] == ["dependabot", "renovate"]
+    assert js("/api/bots", {"humanBots": []})[0] == 200 and json.loads(CONFIG.read_text())["humanBots"] == []
 
     # fetch runs custom sections in parallel; a failing one keeps its error, the rest of the inbox stands.
     CONFIG.write_text(json.dumps({"sections": [sec, {"id": "boom", "title": "Boom", "query": "boom"}]}))

@@ -34,6 +34,8 @@ All notable changes to Pudú are documented here. The format is based on
   included.
 - PR fields `key`, `requestedVia`, `mergeQueue`, `autoMerge` and `stackParent`. The agent text says
   "requested via team:x", "in merge queue (#2)", "auto-merge on" and "on top of #484".
+- Bots picker: mark bots (`humanBots` in `config.json`) whose PRs you review like people's, so
+  they land in "Needs your review" instead of "Bots". `POST /api/bots` sets the list.
 - `staleHours` in `config.json`: review wait times turn amber past it and red past three times it.
 - Snooze from the UI: `s` or the row's hover button (1 h, 3 h, tomorrow 9:00, next Monday 9:00,
   custom), and a folded "Snoozed" section to wake PRs early.

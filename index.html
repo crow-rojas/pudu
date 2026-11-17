@@ -123,7 +123,7 @@ kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px sol
 .repo-opt input{accent-color:var(--accent);margin:0}
 .repo-opt span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .repo-opt b{font-weight:500;color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
-#repos-btn[data-filtered]{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+#repos-btn[data-filtered],#bots-btn[data-filtered]{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
 .banner{display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;padding:8px 12px;border-radius:8px;font-size:13px;
   background:color-mix(in srgb,var(--warn) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 30%,transparent)}
 .banner .i{color:var(--warn)}
@@ -280,7 +280,7 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
 @media (max-width:800px){
   :root{--cols:8px 22px minmax(0,1fr) 140px 66px}
   .c-size{display:none!important}
-  .search kbd,#copy-all span,#repos-btn span{display:none}
+  .search kbd,#copy-all span,#repos-btn span,#bots-btn span{display:none}
 }
 @media (max-width:640px){
   .cols,.c-av{display:none!important}
@@ -317,6 +317,7 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
   </label>
   <div class="tools">
     <button class="btn" id="repos-btn" type="button" popovertarget="repos" data-i18n-attr="title:reposTip" hidden></button>
+    <button class="btn" id="bots-btn" type="button" popovertarget="bots" data-i18n-attr="title:botsTip" hidden></button>
     <button class="btn" id="copy-all" type="button" data-i18n-attr="title:copyAllTip" hidden></button>
     <button class="ib" id="refresh" type="button" data-i18n-attr="aria-label:refreshTip,title:refreshTip"></button>
     <button class="ib" id="notify" type="button" aria-pressed="false"></button>
@@ -362,6 +363,10 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
   </div>
   <p class="pop-note" data-i18n="hiddenNote"></p>
   <div id="repo-list"></div>
+</div>
+<div class="pop" id="bots" popover data-i18n-attr="aria-label:botsTip">
+  <p class="pop-note" data-i18n="botsNote"></p>
+  <div id="bot-list"></div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -417,6 +422,8 @@ const T = {
     autoMerge: 'Auto-merge', autoMergeTip: 'GitHub merges it once the required checks and reviews pass', onTopOf: n => `on top of #${n}`,
     openThreads: n => `${n} open thread${n === 1 ? '' : 's'}`, nothingIn: 'Nothing in:', noMatchIn: 'No matches in:', truncTip: 'Open the full search on GitHub (Pudú fetched only part of it)',
     someRepos: (a, b) => `${a} of ${b} repos`, allRepos: 'All repos', saveReposFail: "Couldn't save the repos:",
+    botsTip: 'Choose which bots count as people', botsNote: 'Checked bots show up in Needs your review, like people.',
+    someBots: n => `Bots: ${n} as people`, saveBotsFail: "Couldn't save the bots:",
     noServer: e => `Can't reach the local server (${e}). Pudú retries every minute.`, badReply: "The local server sent a reply Pudú can't read.",
     e_reply_h: 'Unexpected reply from the server', e_reply_p: 'Something other than Pudú answered on this port, or the server hit an error. The details show what came back.',
     apiPoints: (n, at) => `${n} API points left` + (at ? `, resets at ${at}` : ''),
@@ -477,6 +484,8 @@ const T = {
     autoMerge: 'Auto-merge', autoMergeTip: 'GitHub lo mergea cuando pasen los checks y reviews requeridos', onTopOf: n => `sobre #${n}`,
     openThreads: n => `${n} hilo${n === 1 ? '' : 's'} sin resolver`, nothingIn: 'Nada en:', noMatchIn: 'Sin coincidencias en:', truncTip: 'Abre la búsqueda completa en GitHub (Pudú trajo solo una parte)',
     someRepos: (a, b) => `${a} de ${b} repos`, allRepos: 'Todos los repos', saveReposFail: 'No pude guardar los repos:',
+    botsTip: 'Elegir qué bots cuentan como personas', botsNote: 'Los bots marcados aparecen en Necesitan tu review, como personas.',
+    someBots: n => `Bots: ${n} como personas`, saveBotsFail: 'No pude guardar los bots:',
     noServer: e => `No hay conexión con el server local (${e}). Pudú reintenta cada minuto.`, badReply: 'El server local mandó una respuesta que Pudú no entiende.',
     e_reply_h: 'Respuesta inesperada del server', e_reply_p: 'Algo distinto de Pudú respondió en este puerto, o el server tuvo un error. El detalle muestra qué llegó.',
     apiPoints: (n, at) => `${n} puntos de API` + (at ? `, se renueva a las ${at}` : ''),
@@ -545,6 +554,7 @@ const P = {
   alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
   chev: '<path d="m9 6 6 6-6 6"/>',
   behind: '<path d="M12 4v12M6 10l6 6 6-6"/>',
+  bot: '<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 13h.01M15 13h.01M9 17h6"/>',
   repo: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15Z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
   prompt: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>',
@@ -840,6 +850,7 @@ function render() {
   }).join('');
 
   renderRepos();
+  renderBots();
 
   renderChrome();
   tick();
@@ -945,6 +956,38 @@ $('#repos').addEventListener('toggle', e => {
   if (e.newState === 'open') ($('#repo-q').hidden ? $('#repo-list input') : $('#repo-q'))?.focus();
   else { $('#repo-q').value = ''; filterRepos(); }
 });
+
+// why: while a save is in flight the checkboxes keep the pending choice, so a re-render can't flip them back.
+let botSig = '', botsBusy = 0;
+function renderBots() {
+  const bots = arr(S.data?.bots).filter(b => b?.login), people = bots.filter(b => b.human).length;
+  const btn = $('#bots-btn');
+  btn.hidden = !bots.length;
+  btn.innerHTML = `${ico('bot')}<span>${people ? t('someBots', people) : t('s_bots')}</span>${ico('down')}`;
+  btn.toggleAttribute('data-filtered', people > 0);
+  const sig = bots.map(b => b.login).join();
+  if (sig !== botSig) {
+    botSig = sig;
+    $('#bot-list').innerHTML = bots.map(b => `<label class="repo-opt" title="@${esc(b.login)}">`
+      + `<input type="checkbox" data-bot="${esc(b.login)}"><span>@${esc(b.login)}</span><b></b></label>`).join('');
+  }
+  if (botsBusy) return;
+  const by = new Map(bots.map(b => [b.login, b]));
+  for (const i of document.querySelectorAll('#bot-list [data-bot]')) {
+    const b = by.get(i.dataset.bot);
+    i.checked = !!b.human;
+    i.nextElementSibling.nextElementSibling.textContent = b.count;
+  }
+}
+$('#bot-list').addEventListener('change', async () => {
+  const want = [...document.querySelectorAll('#bot-list [data-bot]:checked')].map(i => i.dataset.bot);
+  let d = null;
+  botsBusy++;
+  try { d = await save('/api/bots', {humanBots: want}); } catch (e) { toast(`${t('saveBotsFail')} <code>${esc(e.message)}</code>`); }
+  botsBusy--;
+  if (!d || !apply(d)) renderBots();
+});
+$('#bots').addEventListener('toggle', e => { if (e.newState === 'open') $('#bot-list input')?.focus(); });
 
 function renderChrome() {
   const d = S.data;
