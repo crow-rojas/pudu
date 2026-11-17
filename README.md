@@ -106,11 +106,12 @@ Pudú keeps its preferences in one JSON file:
 - else `$XDG_CONFIG_HOME/pudu/config.json`,
 - else `~/.config/pudu/config.json`.
 
-The page writes `hidden`, and the server writes `snoozed` and `account`. You can edit the file by hand; it's re-read on every request. Writes are atomic and keep keys Pudú doesn't know.
+The page writes `hidden` and `humanBots`, and the server writes `snoozed` and `account`. You can edit the file by hand; it's re-read on every request. Writes are atomic and keep keys Pudú doesn't know.
 
 ```json
 {
   "hidden": ["acme/legacy-app"],
+  "humanBots": ["acme-release-bot"],
   "snoozed": {
     "acme/api#482": {"until": "2026-10-21T12:00:00Z", "updatedAt": "2026-10-20T09:14:02Z"}
   },
@@ -125,6 +126,7 @@ The page writes `hidden`, and the server writes `snoozed` and `account`. You can
 | Key | What it does |
 |---|---|
 | `hidden` | Repos (`owner/name`) left out of every section, the tab badge, notifications and the markdown. Set from the repo picker (`p`). Alt-click a repo to keep only that one. |
+| `humanBots` | Bot logins treated as people: their PRs show up in "Needs your review" instead of "Bots", and count in the tab badge and notifications. Set from the Bots picker, which lists every bot seen in your PRs. |
 | `snoozed` | PRs hidden until `until` (UTC). A snoozed PR wakes early when its `updatedAt` on GitHub moves past the stored one, so a push, review or comment brings it back. Expired entries are pruned on the next write. |
 | `sections` | Up to 10 extra sections, each a GitHub search. `id`: lowercase letters, digits, `-` or `_` (up to 40 characters), not a built-in id. `title`: up to 80 characters. `query`: up to 256 characters. Pudú adds `is:pr` and `archived:false` unless you set them; add `is:open` yourself if you want it. Each shows up to 50 PRs, and a broken query shows its error in its own section only. |
 | `staleHours` | Hours after which a review request counts as stale, 1 to 720 (default 24). Returned as `settings.staleHours` in `/api/data`. |
@@ -163,6 +165,7 @@ curl -s 'localhost:8765/pr.md?pr=https://github.com/acme/api/pull/482'
 | `GET /pr.md?pr=<url or owner/repo%23N>` | One PR: its inbox line, failed checks with links, unresolved review threads (`path:line @author: first comment`) and ready-to-run `gh pr checkout`, `gh pr diff` and `gh pr checks` commands. Encode `#` as `%23`. |
 | `GET /api/data` | Everything the page uses, as JSON. `?lang=`, `?force=1`. |
 | `POST /api/hidden` | `{"hidden": ["owner/repo", …]}` replaces the hidden repos. |
+| `POST /api/bots` | `{"humanBots": ["login", …]}` replaces the bots treated as people. |
 | `POST /api/snooze` | `{"key": "owner/repo#N", "until": "2026-10-21T12:00:00Z"}` snoozes a PR; `"until": null` wakes it. |
 | `POST /api/account` | `{"host": "github.com", "user": "login"}` switches to another account `gh` is logged in to. |
 
