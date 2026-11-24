@@ -5,7 +5,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # why: setup-python has no 3.9 build for Ubuntu 26.04, which ubuntu-latest now points to.
+        os: [ubuntu-24.04, macos-latest]
         python: ["3.9", "3.x"]
     runs-on: ${{ matrix.os }}
     env:
