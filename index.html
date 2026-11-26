@@ -1026,10 +1026,10 @@ async function loadReviewers(params) {
   // why: a slower answer for an org you already switched away from must not overwrite the newer one.
   if (id !== revReq) return;
   const orgs = arr(d.orgs).map(String), sel = $('#rev-org');
-  // why: an error answer has no orgs; keeping the last list lets you switch away from the failing org.
-  if (orgs.length) {
+  // why: only a failed org list comes without orgs; keeping the last list then still lets you switch org.
+  if (orgs.length || !d.error) {
     sel.innerHTML = orgs.map(o => `<option${o === d.org ? ' selected' : ''}>${esc(o)}</option>`).join('');
-    sel.hidden = false;
+    sel.hidden = !orgs.length;
   }
   const members = arr(d.members).filter(m => m?.login);
   $('#rev-list').innerHTML = d.error ? note(`<code>${esc(d.error)}</code>`) : !d.org ? note(t('revNoOrgs'))
@@ -1038,11 +1038,11 @@ async function loadReviewers(params) {
       + `<span title="${esc(m.name || m.login)}">${esc(m.login)}</span>${m.recommended ? `<em>${t('revRec')}</em>` : ''}<b>${esc(t('revOpen', Number(m.open) || 0))}</b></div>`).join('');
 }
 function openReviewers(p, btn) {
-  const pop = $('#revs'), r = btn.getBoundingClientRect(), below = innerHeight - r.bottom - 16, above = r.top - 16;
+  const pop = $('#revs'), r = btn.getBoundingClientRect(), vh = document.documentElement.clientHeight, below = vh - r.bottom - 16, above = r.top - 16;
   // why: open on the side with more room and cap the height there, so a long list never runs off screen.
   const down = below >= 300 || below >= above;
   Object.assign(pop.style, {
-    top: down ? `${r.bottom + 4}px` : 'auto', bottom: down ? 'auto' : `${innerHeight - r.top + 4}px`,
+    top: down ? `${r.bottom + 4}px` : 'auto', bottom: down ? 'auto' : `${vh - r.top + 4}px`,
     left: `${Math.max(16, Math.min(r.right - 300, innerWidth - 316))}px`, maxHeight: `${Math.min(560, down ? below : above)}px`,
   });
   pop.showPopover();
