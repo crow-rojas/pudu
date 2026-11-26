@@ -810,7 +810,10 @@ POSTS = {"/api/hidden": post_hidden, "/api/bots": post_bots, "/api/snooze": post
 # why: reviewer load is fetched only when the picker opens and cached, so the inbox refresh never pays for it.
 ORGS_QUERY = "query { viewer { organizations(first: 100) { nodes { login } } } }"
 MEMBERS_QUERY = """
-query($org: String!) { organization(login: $org) { membersWithRole(first: 100) { totalCount nodes { login name avatarUrl } } } }
+query($org: String!) { organization(login: $org) {
+  membersWithRole(first: 100) { totalCount nodes { login name avatarUrl } }
+  teams(first: 100) { nodes { members(first: 100) { nodes { login } } } }
+} }
 """
 # ponytail: one search per member; a bigger org would cost hundreds of points per open, so it's refused instead.
 REVIEWERS_MAX = 100
@@ -836,8 +839,11 @@ def demo_gql(query, **v):
   if query == ORGS_QUERY:
     return {"viewer": {"organizations": {"nodes": [{"login": "acme"}, {"login": "octo-labs"}]}}}
   if query == MEMBERS_QUERY:
-    names = {"acme": ["crow-demo", "diego-m", "priya-k", "tom-h", "yuki-s"], "octo-labs": ["crow-demo", "sam-r", "lee-w"]}[v["org"]]
-    return {"organization": {"membersWithRole": {"totalCount": len(names), "nodes": [{"login": n, "name": None, "avatarUrl": None} for n in names]}}}
+    names = {"acme": ["crow-demo", "diego-m", "priya-k", "tom-h", "yuki-s", "acme-deploy"], "octo-labs": ["crow-demo", "sam-r", "lee-w"]}[v["org"]]
+    return {"organization": {
+      "membersWithRole": {"totalCount": len(names), "nodes": [{"login": n, "name": None, "avatarUrl": None} for n in names]},
+      "teams": {"nodes": [{"members": {"nodes": [{"login": n} for n in names if n != "acme-deploy"]}}] if v["org"] == "acme" else []},
+    }}
   load = {"diego-m": 4, "priya-k": 3, "tom-h": 3, "yuki-s": 1, "sam-r": 2, "lee-w": 0}
   return {f"u{i}": {"issueCount": load.get(l, 0)} for i, l in re.findall(r"u(\d+): search\(.*?review-requested:([\w-]+)", query)}
 
@@ -856,9 +862,12 @@ def reviewers(org=None, owner=None, me=None):
     return out
   hit = _reviewers.get((account, pick))
   if not hit or time.time() - hit[0] > REVIEWERS_SECONDS:
-    team = dig(gql(MEMBERS_QUERY, org=pick), "organization", "membersWithRole") or {}
+    o = dig(gql(MEMBERS_QUERY, org=pick), "organization") or {}
+    team = o.get("membersWithRole") or {}
+    # why: members in no team are service accounts and bots; an org without teams keeps everyone.
+    in_team = {m.get("login") for t in nodes(o, "teams") for m in nodes(t, "members")}
     members = [{"login": m["login"], "name": m.get("name"), "avatar": m.get("avatarUrl")}
-               for m in team.get("nodes") or [] if m and USER.fullmatch(m.get("login") or "")]
+               for m in team.get("nodes") or [] if m and USER.fullmatch(m.get("login") or "") and (not in_team or m["login"] in in_team)]
     total = team.get("totalCount") or len(members)
     counts = {}
     if total <= REVIEWERS_MAX and members:
@@ -1269,25 +1278,33 @@ def selftest():
   assert hb["bots"] == [{"login": "dependabot", "count": 1, "human": True}, {"login": "gone-bot", "count": 0, "human": True}]
   assert "## Bots (0)" in inbox_md(hb) and "## Needs your review (3)" in inbox_md(hb)
 
-  # reviewer picker: fewest open requests first, ties alphabetical, you left out, the PR's org wins, big orgs refused, cached.
+  # reviewer picker: fewest open requests first, ties alphabetical, you and teamless members left out (unless the org
+  # has no teams), the PR's org wins, big orgs refused, cached.
   gq = []
 
   def fake_gql(q, **v):
     gq.append(q)
     if q == ORGS_QUERY:
-      return {"viewer": {"organizations": {"nodes": [{"login": "zeta"}, {"login": "acme"}]}}}
+      return {"viewer": {"organizations": {"nodes": [{"login": "zeta"}, {"login": "acme"}, {"login": "solo"}]}}}
     if q == MEMBERS_QUERY:
-      return {"organization": {"membersWithRole": {"totalCount": 4 if v["org"] == "acme" else REVIEWERS_MAX + 1,
-                                                   "nodes": [{"login": x} for x in ("me", "b", "a", "c", "bad login")]}}}
-    assert '"is:pr is:open archived:false org:acme review-requested:a"' in q
+      teams = [{"members": {"nodes": [{"login": "me"}, {"login": "a"}]}}, {"members": {"nodes": [{"login": "b"}, {"login": "c"}]}}]
+      return {"organization": {
+        "membersWithRole": {"totalCount": {"acme": 5, "solo": 2}.get(v["org"], REVIEWERS_MAX + 1),
+                            "nodes": [{"login": x} for x in ("me", "b", "a", "bot", "c", "bad login")]},
+        "teams": {"nodes": teams if v["org"] == "acme" else []},
+      }}
+    if "org:solo" in q:
+      return {}
+    assert '"is:pr is:open archived:false org:acme review-requested:a"' in q and "review-requested:bot" not in q
     return {"u1": {"issueCount": 4}, "u2": {"issueCount": 3}, "u3": {"issueCount": 3}}
   g["graphql"] = fake_gql
   _reviewers.clear()
   r = reviewers("zeta", "acme", "me")
-  assert r["org"] == "acme" and r["orgs"] == ["acme", "zeta"] and r["total"] == 4 and not r["tooMany"]
+  assert r["org"] == "acme" and r["orgs"] == ["acme", "solo", "zeta"] and r["total"] == 5 and not r["tooMany"]
   assert [(m["login"], m["open"], m["recommended"]) for m in r["members"]] == [("a", 3, True), ("c", 3, False), ("b", 4, False)]
+  assert [m["login"] for m in reviewers("solo", None, "me")["members"]] == ["a", "b", "bot", "c"]
   calls_before = len(gq)
-  assert reviewers(None, "acme", "me") == r and reviewers(None, None, "me")["org"] == "acme" and len(gq) == calls_before
+  assert reviewers(None, "acme", "me") == r and reviewers("acme", None, "me")["org"] == "acme" and len(gq) == calls_before
   big = reviewers("zeta", "some-user", "me")
   assert big["org"] == "zeta" and big["tooMany"] and big["members"] == [] and len(gq) == calls_before + 1
   g["graphql"], g["DEMO"] = saved["graphql"], True
