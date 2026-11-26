@@ -848,6 +848,29 @@ def demo_gql(query, **v):
   return {f"u{i}": {"issueCount": load.get(l, 0)} for i, l in re.findall(r"u(\d+): search\(.*?review-requested:([\w-]+)", query)}
 
 
+def org_load(gql, org):
+  o = dig(gql(MEMBERS_QUERY, org=org), "organization")
+  # why: graphql() drops errors when some data came back; a null org or field (SAML SSO, no access, a restricted
+  # OAuth app) would otherwise read as "nobody here" or "no teams" and be cached as such.
+  if not o or not isinstance(o.get("membersWithRole"), dict) or not isinstance(o.get("teams"), dict):
+    raise RuntimeError(f"GitHub didn't return the members and teams of {org} (SAML SSO or no access?)")
+  team = o["membersWithRole"]
+  # why: members in no team are service accounts and bots; an org without teams keeps everyone.
+  in_team = {m.get("login") for t in nodes(o, "teams") for m in nodes(t, "members")}
+  members = [{"login": m["login"], "name": m.get("name"), "avatar": m.get("avatarUrl")}
+             for m in team.get("nodes") or [] if m and USER.fullmatch(m.get("login") or "") and (not in_team or m["login"] in in_team)]
+  total = team.get("totalCount") or len(members)
+  counts = {}
+  if total <= REVIEWERS_MAX and members:
+    got = gql(load_query(org, [m["login"] for m in members]))
+    counts = {m["login"]: dig(got, f"u{i}", "issueCount") for i, m in enumerate(members)}
+    # why: a failed search would read as 0 and make that person the recommendation.
+    missing = [k for k, n in counts.items() if not isinstance(n, int)]
+    if missing:
+      raise RuntimeError(f"GitHub didn't return the review load of {', '.join(missing)}")
+  return {"members": members, "counts": counts, "total": total}
+
+
 def reviewers(org=None, owner=None, me=None):
   gql = demo_gql if DEMO else graphql
   a = config_account(read_config())
@@ -863,25 +886,10 @@ def reviewers(org=None, owner=None, me=None):
     return out
   hit = _reviewers.get((account, pick))
   if not hit or time.time() - hit[0] > REVIEWERS_SECONDS:
-    o = dig(gql(MEMBERS_QUERY, org=pick), "organization")
-    # why: GitHub answers null (errors dropped) for an org behind SAML SSO or hidden from you; "nobody here" would be wrong.
-    if not o:
-      raise RuntimeError(f"GitHub didn't return the members of {pick} (SAML SSO or no access?)")
-    team = o.get("membersWithRole") or {}
-    # why: members in no team are service accounts and bots; an org without teams keeps everyone.
-    in_team = {m.get("login") for t in nodes(o, "teams") for m in nodes(t, "members")}
-    members = [{"login": m["login"], "name": m.get("name"), "avatar": m.get("avatarUrl")}
-               for m in team.get("nodes") or [] if m and USER.fullmatch(m.get("login") or "") and (not in_team or m["login"] in in_team)]
-    total = team.get("totalCount") or len(members)
-    counts = {}
-    if total <= REVIEWERS_MAX and members:
-      got = gql(load_query(pick, [m["login"] for m in members]))
-      counts = {m["login"]: dig(got, f"u{i}", "issueCount") for i, m in enumerate(members)}
-      # why: a failed search would read as 0 and make that person the recommendation.
-      missing = [k for k, n in counts.items() if not isinstance(n, int)]
-      if missing:
-        raise RuntimeError(f"GitHub didn't return the review load of {', '.join(missing)}")
-    hit = _reviewers[(account, pick)] = (time.time(), {"members": members, "counts": counts, "total": total})
+    try:
+      hit = _reviewers[(account, pick)] = (time.time(), org_load(gql, pick))
+    except Exception as e:  # why: the error comes with the org list, so the picker can still switch to another org.
+      return {**out, "error": str(e)}
   c = hit[1]
   if c["total"] > REVIEWERS_MAX:
     return {**out, "total": c["total"], "tooMany": True}
@@ -1295,7 +1303,7 @@ def selftest():
   def fake_gql(q, **v):
     gq.append(q)
     if q == ORGS_QUERY:
-      return {"viewer": {"organizations": {"nodes": [{"login": "zeta"}, {"login": "acme"}, {"login": "solo"}]}}}
+      return {"viewer": {"organizations": {"nodes": [{"login": "zeta"}, {"login": "acme"}, {"login": "solo"}, {"login": "Beta"}]}}}
     if q == MEMBERS_QUERY:
       teams = [{"members": {"nodes": [{"login": "me"}, {"login": "a"}]}}, {"members": {"nodes": [{"login": "b"}, {"login": "c"}]}}]
       return {"organization": {
@@ -1310,7 +1318,7 @@ def selftest():
   g["graphql"] = fake_gql
   _reviewers.clear()
   r = reviewers("zeta", "acme", "me")
-  assert r["org"] == "acme" and r["orgs"] == ["acme", "solo", "zeta"] and r["total"] == 5 and not r["tooMany"]
+  assert r["org"] == "acme" and r["orgs"] == ["acme", "Beta", "solo", "zeta"] and r["total"] == 5 and not r["tooMany"]
   assert [(m["login"], m["open"], m["recommended"]) for m in r["members"]] == [("a", 3, True), ("c", 3, False), ("b", 4, False)]
   assert [m["login"] for m in reviewers("solo", None, "me")["members"]] == ["a", "b", "bot", "c"]
   calls_before = len(gq)
@@ -1320,22 +1328,23 @@ def selftest():
   CONFIG.parent.mkdir(parents=True, exist_ok=True)
   CONFIG.write_text(json.dumps({"account": {"host": "github.com", "user": "me"}}))
   assert reviewers("acme", None, "me")["members"] == r["members"] and len(gq) > calls_before + 1
+  assert (("github.com", "me"), "acme") in _reviewers and (None, "acme") in _reviewers
   CONFIG.unlink()
   _reviewers.clear()
 
+  # GitHub errors (null org, null field, missing count) come back with the org list and are not cached.
   def broken(q, **v):
     if q == ORGS_QUERY:
       return fake_gql(q)
     if q == MEMBERS_QUERY:
-      return {"organization": None} if v["org"] == "zeta" else fake_gql(q, **v)
+      o = fake_gql(q, **v)["organization"]
+      return {"organization": {"zeta": None, "solo": {**o, "teams": None}, "Beta": {**o, "membersWithRole": None}}.get(v["org"], o)}
     return {"u1": {"issueCount": 4}}
   g["graphql"] = broken
-  for o, msg in (("zeta", "members of zeta"), ("acme", "review load of me, a, c")):
-    try:
-      reviewers(o, None, "me")
-      raise AssertionError(o)
-    except RuntimeError as e:
-      assert msg in str(e), e
+  for o, msg in (("zeta", "members and teams of zeta"), ("solo", "of solo"), ("Beta", "of Beta"), ("acme", "review load of me, a, c")):
+    e = reviewers(o, None, "me")
+    assert e["org"] == o and e["orgs"] == ["acme", "Beta", "solo", "zeta"] and msg in e["error"] and e["members"] == [], e
+  assert all(k[1] is None for k in _reviewers)
   g["graphql"], g["DEMO"] = saved["graphql"], True
   _reviewers.clear()
   assert [m["login"] for m in reviewers(None, "octo-labs", "crow-demo")["members"]] == ["lee-w", "sam-r"]
