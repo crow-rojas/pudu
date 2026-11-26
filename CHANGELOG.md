@@ -36,6 +36,9 @@ All notable changes to Pudú are documented here. The format is based on
   "requested via team:x", "in merge queue (#2)", "auto-merge on" and "on top of #484".
 - Bots picker: mark bots (`humanBots` in `config.json`) whose PRs you review like people's, so
   they land in "Needs your review" instead of "Bots". `POST /api/bots` sets the list.
+- Reviewer suggestions: your open PRs with nobody on them show "Suggest" in the Reviewers column.
+  It lists the org's members by fewest open review requests, the first one recommended, with an
+  org picker. Read-only, through `GET /api/reviewers`.
 - `staleHours` in `config.json`: review wait times turn amber past it and red past three times it.
 - Snooze from the UI: `s` or the row's hover button (1 h, 3 h, tomorrow 9:00, next Monday 9:00,
   custom), and a folded "Snoozed" section to wake PRs early.

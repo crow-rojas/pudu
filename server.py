@@ -807,6 +807,69 @@ def post_account(body):
 
 POSTS = {"/api/hidden": post_hidden, "/api/bots": post_bots, "/api/snooze": post_snooze, "/api/account": post_account}
 
+# why: reviewer load is fetched only when the picker opens and cached, so the inbox refresh never pays for it.
+ORGS_QUERY = "query { viewer { organizations(first: 100) { nodes { login } } } }"
+MEMBERS_QUERY = """
+query($org: String!) { organization(login: $org) { membersWithRole(first: 100) { totalCount nodes { login name avatarUrl } } } }
+"""
+# ponytail: one search per member; a bigger org would cost hundreds of points per open, so it's refused instead.
+REVIEWERS_MAX = 100
+REVIEWERS_SECONDS = 300
+ORG = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
+_reviewers = {}
+
+
+def load_query(org, logins):
+  return "query { " + " ".join(
+    f"u{i}: search(type: ISSUE, first: 0, query: {json.dumps(f'is:pr is:open archived:false org:{org} review-requested:{l}')}) {{ issueCount }}"
+    for i, l in enumerate(logins)
+  ) + " }"
+
+
+# why: fewest open review requests first; ties go alphabetically so the order is stable between opens.
+def rank_reviewers(members, counts, me):
+  people = sorted((m for m in members if m["login"] != me), key=lambda m: (counts.get(m["login"], 0), m["login"].lower()))
+  return [{**m, "open": counts.get(m["login"], 0), "recommended": i == 0} for i, m in enumerate(people)]
+
+
+def demo_gql(query, **v):
+  if query == ORGS_QUERY:
+    return {"viewer": {"organizations": {"nodes": [{"login": "acme"}, {"login": "octo-labs"}]}}}
+  if query == MEMBERS_QUERY:
+    names = {"acme": ["crow-demo", "diego-m", "priya-k", "tom-h", "yuki-s"], "octo-labs": ["crow-demo", "sam-r", "lee-w"]}[v["org"]]
+    return {"organization": {"membersWithRole": {"totalCount": len(names), "nodes": [{"login": n, "name": None, "avatarUrl": None} for n in names]}}}
+  load = {"diego-m": 4, "priya-k": 3, "tom-h": 3, "yuki-s": 1, "sam-r": 2, "lee-w": 0}
+  return {f"u{i}": {"issueCount": load.get(l, 0)} for i, l in re.findall(r"u(\d+): search\(.*?review-requested:([\w-]+)", query)}
+
+
+def reviewers(org=None, owner=None, me=None):
+  gql = demo_gql if DEMO else graphql
+  account = config_account(read_config())
+  hit = _reviewers.get((account, None))
+  if not hit or time.time() - hit[0] > REVIEWERS_SECONDS:
+    hit = _reviewers[(account, None)] = (time.time(), sorted(n["login"] for n in nodes(gql(ORGS_QUERY), "viewer", "organizations")))
+  orgs = hit[1]
+  # why: a PR in an org you belong to asks that org; the picker's choice covers personal repos.
+  pick = next((o for o in (owner, org) if o in orgs), orgs[0] if orgs else None)
+  out = {"orgs": orgs, "org": pick, "members": [], "total": 0, "tooMany": False}
+  if not pick:
+    return out
+  hit = _reviewers.get((account, pick))
+  if not hit or time.time() - hit[0] > REVIEWERS_SECONDS:
+    team = dig(gql(MEMBERS_QUERY, org=pick), "organization", "membersWithRole") or {}
+    members = [{"login": m["login"], "name": m.get("name"), "avatar": m.get("avatarUrl")}
+               for m in team.get("nodes") or [] if m and USER.fullmatch(m.get("login") or "")]
+    total = team.get("totalCount") or len(members)
+    counts = {}
+    if total <= REVIEWERS_MAX and members:
+      got = gql(load_query(pick, [m["login"] for m in members]))
+      counts = {m["login"]: dig(got, f"u{i}", "issueCount") or 0 for i, m in enumerate(members)}
+    hit = _reviewers[(account, pick)] = (time.time(), {"members": members, "counts": counts, "total": total})
+  c = hit[1]
+  if c["total"] > REVIEWERS_MAX:
+    return {**out, "total": c["total"], "tooMany": True}
+  return {**out, "total": c["total"], "members": rank_reviewers(c["members"], c["counts"], me)}
+
 PR_QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $requested: Boolean!) {
   viewer { login }
@@ -905,6 +968,13 @@ class Handler(BaseHTTPRequestHandler):
     lang = pick_lang(qs)
     if url.path == "/api/data":
       self._send(200, "application/json", json.dumps(data(qs.get("force") == ["1"], lang)).encode())
+    elif url.path == "/api/reviewers":
+      org, owner = ((qs.get(k) or [""])[0] for k in ("org", "owner"))
+      try:
+        out = reviewers(org if ORG.fullmatch(org) else None, owner if ORG.fullmatch(owner) else None, data(lang=lang)["login"])
+      except Exception as e:  # why: the picker shows why it's empty instead of a bare HTTP error.
+        out = {"error": str(e)}
+      self._send(200, "application/json", json.dumps(out).encode())
     elif url.path == "/inbox.md":
       d = data(qs.get("force") == ["1"], lang)
       if not d["login"]:
@@ -1198,6 +1268,33 @@ def selftest():
   assert hb["review"]["bots"] == [] and nums(hb["review"]["humans"]) == nums(sorted(out["review"]["humans"] + out["review"]["bots"], key=wait_order))
   assert hb["bots"] == [{"login": "dependabot", "count": 1, "human": True}, {"login": "gone-bot", "count": 0, "human": True}]
   assert "## Bots (0)" in inbox_md(hb) and "## Needs your review (3)" in inbox_md(hb)
+
+  # reviewer picker: fewest open requests first, ties alphabetical, you left out, the PR's org wins, big orgs refused, cached.
+  gq = []
+
+  def fake_gql(q, **v):
+    gq.append(q)
+    if q == ORGS_QUERY:
+      return {"viewer": {"organizations": {"nodes": [{"login": "zeta"}, {"login": "acme"}]}}}
+    if q == MEMBERS_QUERY:
+      return {"organization": {"membersWithRole": {"totalCount": 4 if v["org"] == "acme" else REVIEWERS_MAX + 1,
+                                                   "nodes": [{"login": x} for x in ("me", "b", "a", "c", "bad login")]}}}
+    assert '"is:pr is:open archived:false org:acme review-requested:a"' in q
+    return {"u1": {"issueCount": 4}, "u2": {"issueCount": 3}, "u3": {"issueCount": 3}}
+  g["graphql"] = fake_gql
+  _reviewers.clear()
+  r = reviewers("zeta", "acme", "me")
+  assert r["org"] == "acme" and r["orgs"] == ["acme", "zeta"] and r["total"] == 4 and not r["tooMany"]
+  assert [(m["login"], m["open"], m["recommended"]) for m in r["members"]] == [("a", 3, True), ("c", 3, False), ("b", 4, False)]
+  calls_before = len(gq)
+  assert reviewers(None, "acme", "me") == r and reviewers(None, None, "me")["org"] == "acme" and len(gq) == calls_before
+  big = reviewers("zeta", "some-user", "me")
+  assert big["org"] == "zeta" and big["tooMany"] and big["members"] == [] and len(gq) == calls_before + 1
+  g["graphql"], g["DEMO"] = saved["graphql"], True
+  _reviewers.clear()
+  assert [m["login"] for m in reviewers(None, "octo-labs", "crow-demo")["members"]] == ["lee-w", "sam-r"]
+  g["DEMO"] = saved["DEMO"]
+  _reviewers.clear()
   ves = view(out, {}, "es")
   assert [{k: x for k, x in p.items() if k != "md"} for p in ves["review"]["humans"]] == out["review"]["humans"]
   assert ves["review"]["humans"][0]["md"] == md_line(out["review"]["humans"][0], "es")
@@ -1466,6 +1563,12 @@ def selftest():
     assert code == 200 and [b["login"] for b in json.loads(body)["bots"] if b["human"]] == ["dependabot", "renovate"]
     assert json.loads(CONFIG.read_text())["humanBots"] == ["dependabot", "renovate"]
     assert js("/api/bots", {"humanBots": []})[0] == 200 and json.loads(CONFIG.read_text())["humanBots"] == []
+    # reviewers: read-only GET, a gh failure comes back as an error field.
+    live_gql, g["graphql"] = g["graphql"], lambda q, **v: (_ for _ in ()).throw(RuntimeError("no read:org"))
+    code, body = req("GET", "/api/reviewers?org=bad%20org&owner=o")
+    assert code == 200 and json.loads(body) == {"error": "no read:org"}
+    assert req("GET", "/api/reviewers", Sec_Fetch_Site="cross-site")[0] == 403
+    g["graphql"] = live_gql
 
     # fetch runs custom sections in parallel; a failing one keeps its error, the rest of the inbox stands.
     CONFIG.write_text(json.dumps({"sections": [sec, {"id": "boom", "title": "Boom", "query": "boom"}]}))
