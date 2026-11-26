@@ -815,7 +815,7 @@ query($org: String!) { organization(login: $org) {
   teams(first: 100) { nodes { members(first: 100) { nodes { login } } } }
 } }
 """
-# ponytail: one search per member; a bigger org would cost hundreds of points per open, so it's refused instead.
+# ponytail: one aliased search per member; 100 already take ~8 s of GitHub's ~10 s GraphQL timeout, so bigger orgs are refused.
 REVIEWERS_MAX = 100
 REVIEWERS_SECONDS = 300
 ORG = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
@@ -850,10 +850,11 @@ def demo_gql(query, **v):
 
 def reviewers(org=None, owner=None, me=None):
   gql = demo_gql if DEMO else graphql
-  account = config_account(read_config())
+  a = config_account(read_config())
+  account = a and (a["host"], a["user"])
   hit = _reviewers.get((account, None))
   if not hit or time.time() - hit[0] > REVIEWERS_SECONDS:
-    hit = _reviewers[(account, None)] = (time.time(), sorted(n["login"] for n in nodes(gql(ORGS_QUERY), "viewer", "organizations")))
+    hit = _reviewers[(account, None)] = (time.time(), sorted((n["login"] for n in nodes(gql(ORGS_QUERY), "viewer", "organizations")), key=str.lower))
   orgs = hit[1]
   # why: a PR in an org you belong to asks that org; the picker's choice covers personal repos.
   pick = next((o for o in (owner, org) if o in orgs), orgs[0] if orgs else None)
@@ -862,7 +863,10 @@ def reviewers(org=None, owner=None, me=None):
     return out
   hit = _reviewers.get((account, pick))
   if not hit or time.time() - hit[0] > REVIEWERS_SECONDS:
-    o = dig(gql(MEMBERS_QUERY, org=pick), "organization") or {}
+    o = dig(gql(MEMBERS_QUERY, org=pick), "organization")
+    # why: GitHub answers null (errors dropped) for an org behind SAML SSO or hidden from you; "nobody here" would be wrong.
+    if not o:
+      raise RuntimeError(f"GitHub didn't return the members of {pick} (SAML SSO or no access?)")
     team = o.get("membersWithRole") or {}
     # why: members in no team are service accounts and bots; an org without teams keeps everyone.
     in_team = {m.get("login") for t in nodes(o, "teams") for m in nodes(t, "members")}
@@ -872,7 +876,11 @@ def reviewers(org=None, owner=None, me=None):
     counts = {}
     if total <= REVIEWERS_MAX and members:
       got = gql(load_query(pick, [m["login"] for m in members]))
-      counts = {m["login"]: dig(got, f"u{i}", "issueCount") or 0 for i, m in enumerate(members)}
+      counts = {m["login"]: dig(got, f"u{i}", "issueCount") for i, m in enumerate(members)}
+      # why: a failed search would read as 0 and make that person the recommendation.
+      missing = [k for k, n in counts.items() if not isinstance(n, int)]
+      if missing:
+        raise RuntimeError(f"GitHub didn't return the review load of {', '.join(missing)}")
     hit = _reviewers[(account, pick)] = (time.time(), {"members": members, "counts": counts, "total": total})
   c = hit[1]
   if c["total"] > REVIEWERS_MAX:
@@ -980,7 +988,9 @@ class Handler(BaseHTTPRequestHandler):
     elif url.path == "/api/reviewers":
       org, owner = ((qs.get(k) or [""])[0] for k in ("org", "owner"))
       try:
-        out = reviewers(org if ORG.fullmatch(org) else None, owner if ORG.fullmatch(owner) else None, data(lang=lang)["login"])
+        # why: the cached login avoids a full inbox refresh; data() only runs before the first fetch.
+        me = (_cache["data"] or {}).get("login") or data(lang=lang)["login"]
+        out = reviewers(org if ORG.fullmatch(org) else None, owner if ORG.fullmatch(owner) else None, me)
       except Exception as e:  # why: the picker shows why it's empty instead of a bare HTTP error.
         out = {"error": str(e)}
       self._send(200, "application/json", json.dumps(out).encode())
@@ -1294,9 +1304,9 @@ def selftest():
         "teams": {"nodes": teams if v["org"] == "acme" else []},
       }}
     if "org:solo" in q:
-      return {}
+      return {f"u{i}": {"issueCount": 0} for i in range(10)}
     assert '"is:pr is:open archived:false org:acme review-requested:a"' in q and "review-requested:bot" not in q
-    return {"u1": {"issueCount": 4}, "u2": {"issueCount": 3}, "u3": {"issueCount": 3}}
+    return {"u0": {"issueCount": 9}, "u1": {"issueCount": 4}, "u2": {"issueCount": 3}, "u3": {"issueCount": 3}}
   g["graphql"] = fake_gql
   _reviewers.clear()
   r = reviewers("zeta", "acme", "me")
@@ -1307,6 +1317,25 @@ def selftest():
   assert reviewers(None, "acme", "me") == r and reviewers("acme", None, "me")["org"] == "acme" and len(gq) == calls_before
   big = reviewers("zeta", "some-user", "me")
   assert big["org"] == "zeta" and big["tooMany"] and big["members"] == [] and len(gq) == calls_before + 1
+  CONFIG.parent.mkdir(parents=True, exist_ok=True)
+  CONFIG.write_text(json.dumps({"account": {"host": "github.com", "user": "me"}}))
+  assert reviewers("acme", None, "me")["members"] == r["members"] and len(gq) > calls_before + 1
+  CONFIG.unlink()
+  _reviewers.clear()
+
+  def broken(q, **v):
+    if q == ORGS_QUERY:
+      return fake_gql(q)
+    if q == MEMBERS_QUERY:
+      return {"organization": None} if v["org"] == "zeta" else fake_gql(q, **v)
+    return {"u1": {"issueCount": 4}}
+  g["graphql"] = broken
+  for o, msg in (("zeta", "members of zeta"), ("acme", "review load of me, a, c")):
+    try:
+      reviewers(o, None, "me")
+      raise AssertionError(o)
+    except RuntimeError as e:
+      assert msg in str(e), e
   g["graphql"], g["DEMO"] = saved["graphql"], True
   _reviewers.clear()
   assert [m["login"] for m in reviewers(None, "octo-labs", "crow-demo")["members"]] == ["lee-w", "sam-r"]

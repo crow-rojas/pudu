@@ -377,7 +377,7 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
   <p class="pop-note" data-i18n="botsNote"></p>
   <div id="bot-list"></div>
 </div>
-<div class="pop" id="revs" popover data-i18n-attr="aria-label:suggestTip">
+<div class="pop" id="revs" popover tabindex="-1" data-i18n-attr="aria-label:suggestTip">
   <div class="pop-h"><label class="sr" for="rev-org" data-i18n="revOrg"></label><select id="rev-org" hidden></select></div>
   <p class="pop-note" data-i18n="revNote"></p>
   <div id="rev-list"></div>
@@ -439,7 +439,7 @@ const T = {
     botsTip: 'Choose which bots count as people', botsNote: 'Checked bots show up in Needs your review, like people.',
     someBots: n => `Bots: ${n} as people`, saveBotsFail: "Couldn't save the bots:",
     suggest: 'Suggest', suggestTip: 'Suggest a reviewer', revOrg: 'Organization', revRec: 'Recommended', revOpen: n => `${n} to review`,
-    revNote: 'Fewest PRs waiting on their review first. Members in no team are left out. Request the review on GitHub.', revLoading: 'Loading reviewers…',
+    revNote: 'Fewest PRs waiting on their review first. Members in no team are left out when the org has teams. Request the review on GitHub.', revLoading: 'Loading reviewers…',
     revNone: 'Nobody else in this org.', revNoOrgs: "Pudú can't see any organization you belong to.",
     revTooMany: (o, n) => `${o} has ${n} members. Pudú suggests reviewers only in orgs of up to 100.`,
     noServer: e => `Can't reach the local server (${e}). Pudú retries every minute.`, badReply: "The local server sent a reply Pudú can't read.",
@@ -505,7 +505,7 @@ const T = {
     botsTip: 'Elegir qué bots cuentan como personas', botsNote: 'Los bots marcados aparecen en Necesitan tu review, como personas.',
     someBots: n => `Bots: ${n} como personas`, saveBotsFail: 'No pude guardar los bots:',
     suggest: 'Sugerir', suggestTip: 'Sugerir un reviewer', revOrg: 'Organización', revRec: 'Recomendado', revOpen: n => `${n} por revisar`,
-    revNote: 'Primero quien tiene menos PRs esperando su review. Se omiten los miembros sin equipo. Pide la review en GitHub.', revLoading: 'Cargando reviewers…',
+    revNote: 'Primero quien tiene menos PRs esperando su review. Si la org tiene equipos, se omiten los miembros sin equipo. Pide la review en GitHub.', revLoading: 'Cargando reviewers…',
     revNone: 'No hay nadie más en esta org.', revNoOrgs: 'Pudú no ve ninguna organización a la que pertenezcas.',
     revTooMany: (o, n) => `${o} tiene ${n} miembros. Pudú sugiere reviewers solo en orgs de hasta 100.`,
     noServer: e => `No hay conexión con el server local (${e}). Pudú reintenta cada minuto.`, badReply: 'El server local mandó una respuesta que Pudú no entiende.',
@@ -1026,8 +1026,11 @@ async function loadReviewers(params) {
   // why: a slower answer for an org you already switched away from must not overwrite the newer one.
   if (id !== revReq) return;
   const orgs = arr(d.orgs).map(String), sel = $('#rev-org');
-  sel.innerHTML = orgs.map(o => `<option${o === d.org ? ' selected' : ''}>${esc(o)}</option>`).join('');
-  sel.hidden = !orgs.length;
+  // why: an error answer has no orgs; keeping the last list lets you switch away from the failing org.
+  if (orgs.length) {
+    sel.innerHTML = orgs.map(o => `<option${o === d.org ? ' selected' : ''}>${esc(o)}</option>`).join('');
+    sel.hidden = false;
+  }
   const members = arr(d.members).filter(m => m?.login);
   $('#rev-list').innerHTML = d.error ? note(`<code>${esc(d.error)}</code>`) : !d.org ? note(t('revNoOrgs'))
     : d.tooMany ? note(esc(t('revTooMany', d.org, Number(d.total)))) : !members.length ? note(t('revNone'))
@@ -1035,10 +1038,15 @@ async function loadReviewers(params) {
       + `<span title="${esc(m.name || m.login)}">${esc(m.login)}</span>${m.recommended ? `<em>${t('revRec')}</em>` : ''}<b>${esc(t('revOpen', Number(m.open) || 0))}</b></div>`).join('');
 }
 function openReviewers(p, btn) {
-  const pop = $('#revs'), r = btn.getBoundingClientRect();
-  pop.style.top = `${Math.max(8, Math.min(r.bottom + 4, innerHeight - 240))}px`;
-  pop.style.left = `${Math.max(16, Math.min(r.right - 300, innerWidth - 316))}px`;
+  const pop = $('#revs'), r = btn.getBoundingClientRect(), below = innerHeight - r.bottom - 16, above = r.top - 16;
+  // why: open on the side with more room and cap the height there, so a long list never runs off screen.
+  const down = below >= 300 || below >= above;
+  Object.assign(pop.style, {
+    top: down ? `${r.bottom + 4}px` : 'auto', bottom: down ? 'auto' : `${innerHeight - r.top + 4}px`,
+    left: `${Math.max(16, Math.min(r.right - 300, innerWidth - 316))}px`, maxHeight: `${Math.min(560, down ? below : above)}px`,
+  });
   pop.showPopover();
+  ($('#rev-org').hidden ? pop : $('#rev-org')).focus();
   loadReviewers({owner: p.owner || '', org: String(store.get('revOrg', ''))});
 }
 $('#rev-org').addEventListener('change', e => { store.set('revOrg', e.target.value); loadReviewers({org: e.target.value}); });
