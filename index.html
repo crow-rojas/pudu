@@ -124,6 +124,15 @@ kbd{font:600 11px/1 var(--mono);padding:2px 5px;border-radius:4px;border:1px sol
 .repo-opt span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .repo-opt b{font-weight:500;color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
 #repos-btn[data-filtered],#bots-btn[data-filtered]{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.sugg{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border:1px dashed var(--line);border-radius:12px;background:none;color:var(--muted);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.sugg:is(:hover,:focus-visible){color:var(--accent);border-color:var(--accent)}
+#revs{inset:auto;width:300px}
+#revs select{flex:1;min-width:0;height:28px;padding:0 6px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit}
+.rev{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px}
+.rev.top{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.rev>span:not(.av){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rev em{font-style:normal;font-size:11px;font-weight:600;color:var(--accent);padding:1px 6px;border-radius:8px;background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.rev b{font-weight:500;color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .banner{display:flex;gap:8px;align-items:flex-start;margin:0 0 10px;padding:8px 12px;border-radius:8px;font-size:13px;
   background:color-mix(in srgb,var(--warn) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 30%,transparent)}
 .banner .i{color:var(--warn)}
@@ -368,6 +377,11 @@ dialog form.snz-custom{display:flex;gap:6px;margin:6px 0 0;padding:10px 0 0;bord
   <p class="pop-note" data-i18n="botsNote"></p>
   <div id="bot-list"></div>
 </div>
+<div class="pop" id="revs" popover data-i18n-attr="aria-label:suggestTip">
+  <div class="pop-h"><label class="sr" for="rev-org" data-i18n="revOrg"></label><select id="rev-org" hidden></select></div>
+  <p class="pop-note" data-i18n="revNote"></p>
+  <div id="rev-list"></div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -424,6 +438,10 @@ const T = {
     someRepos: (a, b) => `${a} of ${b} repos`, allRepos: 'All repos', saveReposFail: "Couldn't save the repos:",
     botsTip: 'Choose which bots count as people', botsNote: 'Checked bots show up in Needs your review, like people.',
     someBots: n => `Bots: ${n} as people`, saveBotsFail: "Couldn't save the bots:",
+    suggest: 'Suggest', suggestTip: 'Suggest a reviewer', revOrg: 'Organization', revRec: 'Recommended', revOpen: n => `${n} open`,
+    revNote: 'Fewest open review requests in the org first. Request the review on GitHub.', revLoading: 'Loading reviewers…',
+    revNone: 'Nobody else in this org.', revNoOrgs: "Pudú can't see any organization you belong to.",
+    revTooMany: (o, n) => `${o} has ${n} members. Pudú suggests reviewers only in orgs of up to 100.`,
     noServer: e => `Can't reach the local server (${e}). Pudú retries every minute.`, badReply: "The local server sent a reply Pudú can't read.",
     e_reply_h: 'Unexpected reply from the server', e_reply_p: 'Something other than Pudú answered on this port, or the server hit an error. The details show what came back.',
     apiPoints: (n, at) => `${n} API points left` + (at ? `, resets at ${at}` : ''),
@@ -486,6 +504,10 @@ const T = {
     someRepos: (a, b) => `${a} de ${b} repos`, allRepos: 'Todos los repos', saveReposFail: 'No pude guardar los repos:',
     botsTip: 'Elegir qué bots cuentan como personas', botsNote: 'Los bots marcados aparecen en Necesitan tu review, como personas.',
     someBots: n => `Bots: ${n} como personas`, saveBotsFail: 'No pude guardar los bots:',
+    suggest: 'Sugerir', suggestTip: 'Sugerir un reviewer', revOrg: 'Organización', revRec: 'Recomendado', revOpen: n => `${n} pendiente${n === 1 ? '' : 's'}`,
+    revNote: 'Primero quien tiene menos reviews pendientes en la org. Pide la review en GitHub.', revLoading: 'Cargando reviewers…',
+    revNone: 'No hay nadie más en esta org.', revNoOrgs: 'Pudú no ve ninguna organización a la que pertenezcas.',
+    revTooMany: (o, n) => `${o} tiene ${n} miembros. Pudú sugiere reviewers solo en orgs de hasta 100.`,
     noServer: e => `No hay conexión con el server local (${e}). Pudú reintenta cada minuto.`, badReply: 'El server local mandó una respuesta que Pudú no entiende.',
     e_reply_h: 'Respuesta inesperada del server', e_reply_p: 'Algo distinto de Pudú respondió en este puerto, o el server tuvo un error. El detalle muestra qué llegó.',
     apiPoints: (n, at) => `${n} puntos de API` + (at ? `, se renueva a las ${at}` : ''),
@@ -540,6 +562,7 @@ const P = {
   ciBad: '<circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/>',
   userOk: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="m16 11 2 2 4-4"/>',
   userBad: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="m17 8 4 4M21 8l-4 4"/>',
+  userPlus: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M19 8v6M16 11h6"/>',
   minus: '<path d="M9 12h6"/>',
   stack: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
@@ -635,7 +658,11 @@ const REVIEW_STATE = {
   COMMENTED: ['comment', '--muted', 'r_COMMENTED'],
   DISMISSED: ['x', '--faint', 'r_DISMISSED'],
 };
-function people(p) {
+function people(p, sec) {
+  // why: an open PR of yours with nobody on it yet is where picking a reviewer helps.
+  if (sec?.mine && !p.mergedAt && p.author === S.data?.login && !arr(p.reviews).length && !arr(p.pending).length) {
+    return `<span class="people c-people z"><button class="sugg" type="button" data-act="reviewers" title="${esc(t('suggestTip'))}">${ico('userPlus')}${t('suggest')}</button></span>`;
+  }
   const seen = new Set();
   const done = arr(p.reviews).filter(r => r && r.login && !seen.has(r.login) && seen.add(r.login));
   const pend = arr(p.pending).filter(r => r && r.login && !seen.has(r.login));
@@ -759,7 +786,7 @@ function row(p, sec, depth = 0, down = false) {
       <div class="meta"><span class="num">#${esc(p.number)}</span><span class="repo" title="${esc(p.repo)}">${esc(repoName(p))}</span>`
       + `${sec.mine ? '' : `<span class="sep">·</span><span>${esc(p.author)}</span>`}${flags(p, sec, depth)}</div>
     </div>
-    ${st.length ? pill(st[0]) : '<span class="c-pill"></span>'}${people(p)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
+    ${st.length ? pill(st[0]) : '<span class="c-pill"></span>'}${people(p, sec)}${threads(p)}${ci(p)}${decision(p)}${mergeable(p, sec)}${size(p)}${when(p, sec)}
     <span class="acts">${act('prompt', 'prompt', t('promptTip'))}${p.snoozedUntil ? act('unsnooze', 'x', t('unsnooze')) : act('snooze', 'clock', t('snoozeTip'))}</span>
   </article>`;
 }
@@ -988,6 +1015,33 @@ $('#bot-list').addEventListener('change', async () => {
   if (!d || !apply(d)) renderBots();
 });
 $('#bots').addEventListener('toggle', e => { if (e.newState === 'open') $('#bot-list input')?.focus(); });
+
+/* reviewer suggestions: read-only, the review is requested on GitHub */
+let revReq = 0;
+async function loadReviewers(params) {
+  const id = ++revReq, note = m => `<p class="pop-note">${m}</p>`;
+  $('#rev-list').innerHTML = note(t('revLoading'));
+  let d;
+  try { d = await readJson(await fetch(`/api/reviewers?${new URLSearchParams(params)}`, {cache: 'no-store'})); } catch (e) { d = {error: e.message}; }
+  // why: a slower answer for an org you already switched away from must not overwrite the newer one.
+  if (id !== revReq) return;
+  const orgs = arr(d.orgs).map(String), sel = $('#rev-org');
+  sel.innerHTML = orgs.map(o => `<option${o === d.org ? ' selected' : ''}>${esc(o)}</option>`).join('');
+  sel.hidden = !orgs.length;
+  const members = arr(d.members).filter(m => m?.login);
+  $('#rev-list').innerHTML = d.error ? note(`<code>${esc(d.error)}</code>`) : !d.org ? note(t('revNoOrgs'))
+    : d.tooMany ? note(esc(t('revTooMany', d.org, Number(d.total)))) : !members.length ? note(t('revNone'))
+    : members.map(m => `<div class="rev${m.recommended ? ' top' : ''}">${avatar(m.login, m.avatar, {title: m.name || m.login})}`
+      + `<span title="${esc(m.name || m.login)}">${esc(m.login)}</span>${m.recommended ? `<em>${t('revRec')}</em>` : ''}<b>${esc(t('revOpen', Number(m.open) || 0))}</b></div>`).join('');
+}
+function openReviewers(p, btn) {
+  const pop = $('#revs'), r = btn.getBoundingClientRect();
+  pop.style.top = `${Math.max(8, Math.min(r.bottom + 4, innerHeight - 240))}px`;
+  pop.style.left = `${Math.max(16, Math.min(r.right - 300, innerWidth - 316))}px`;
+  pop.showPopover();
+  loadReviewers({owner: p.owner || '', org: String(store.get('revOrg', ''))});
+}
+$('#rev-org').addEventListener('change', e => { store.set('revOrg', e.target.value); loadReviewers({org: e.target.value}); });
 
 function renderChrome() {
   const d = S.data;
@@ -1393,6 +1447,7 @@ document.addEventListener('click', e => {
     const r = a.closest('.pr'), p = prOf(r);
     select(r, false);
     if (a.dataset.act === 'snooze') openSnooze(p);
+    else if (a.dataset.act === 'reviewers') openReviewers(p, a);
     else if (a.dataset.act === 'unsnooze') snooze(p, null);
     else copyPrompt(p, r);
     return;

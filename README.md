@@ -164,6 +164,7 @@ curl -s 'localhost:8765/pr.md?pr=https://github.com/acme/api/pull/482'
 | `GET /inbox.md` | The inbox as markdown. `?s=` takes comma-separated section ids: `review`, `returned`, `approved`, `waiting`, `draft`, `merged`, `bots` and your custom section ids. `?lang=en\|es`, `?force=1`. |
 | `GET /pr.md?pr=<url or owner/repo%23N>` | One PR: its inbox line, failed checks with links, unresolved review threads (`path:line @author: first comment`) and ready-to-run `gh pr checkout`, `gh pr diff` and `gh pr checks` commands. Encode `#` as `%23`. |
 | `GET /api/data` | Everything the page uses, as JSON. `?lang=`, `?force=1`. |
+| `GET /api/reviewers` | Your organizations and one org's members (you excluded), fewest open review requests in that org first, the first marked `recommended`. `?owner=` picks that org when you belong to it, else `?org=`, else your first org. Orgs over 100 members return `tooMany` instead. Cached 5 minutes. Read-only: Pudú never requests a review. |
 | `POST /api/hidden` | `{"hidden": ["owner/repo", …]}` replaces the hidden repos. |
 | `POST /api/bots` | `{"humanBots": ["login", …]}` replaces the bots treated as people. |
 | `POST /api/snooze` | `{"key": "owner/repo#N", "until": "2026-10-21T12:00:00Z"}` snoozes a PR; `"until": null` wakes it. |
