@@ -812,21 +812,44 @@ ORGS_QUERY = "query { viewer { organizations(first: 100) { nodes { login } } } }
 MEMBERS_QUERY = """
 query($org: String!) { organization(login: $org) {
   membersWithRole(first: 100) { totalCount nodes { login name avatarUrl } }
-  teams(first: 100) { nodes { members(first: 100) { nodes { login } } } }
+  teams(first: 100) { nodes { slug members(first: 100) { nodes { login } } } }
 } }
 """
-# ponytail: one aliased search per member; 100 already take ~8 s of GitHub's ~10 s GraphQL timeout, so bigger orgs are refused.
+# why: counted from the org's open PRs (drafts included), not a search per member: GitHub refuses to search some
+# logins and answers 0, which made a busy reviewer the recommendation.
+LOAD_QUERY = """
+query($search: String!, $after: String) { search(type: ISSUE, query: $search, first: 100, after: $after) {
+  issueCount pageInfo { hasNextPage endCursor }
+  nodes { ... on PullRequest { reviewRequests(first: 100) { nodes { requestedReviewer { ... on User { login } ... on Team { slug } } } } } }
+} }
+"""
+LOAD_MAX = 1000  # GitHub search returns at most 1000 results.
+# ponytail: members come in one page of 100, so bigger orgs are refused.
 REVIEWERS_MAX = 100
 REVIEWERS_SECONDS = 300
 ORG = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
 _reviewers = {}
 
 
-def load_query(org, logins):
-  return "query { " + " ".join(
-    f"u{i}: search(type: ISSUE, first: 0, query: {json.dumps(f'is:pr is:open archived:false org:{org} review-requested:{l}')}) {{ issueCount }}"
-    for i, l in enumerate(logins)
-  ) + " }"
+# why: a team request counts for each of its members, as GitHub's review-requested: search does.
+def review_load(gql, org, teams):
+  counts, after = {}, None
+  while True:
+    s = dig(gql(LOAD_QUERY, search=f"is:pr is:open archived:false org:{org}", **({"after": after} if after else {})), "search")
+    if not isinstance(s, dict):
+      raise RuntimeError(f"GitHub didn't return the open PRs of {org}")
+    if (s.get("issueCount") or 0) > LOAD_MAX:
+      raise RuntimeError(f"{org} has over {LOAD_MAX} open PRs, too many to count review load")
+    for pr in nodes(s):
+      who = set()
+      for r in nodes(pr, "reviewRequests"):
+        rv = r.get("requestedReviewer") or {}
+        who.update([rv["login"]] if rv.get("login") else teams.get(rv.get("slug"), ()))
+      for login in who:
+        counts[login] = counts.get(login, 0) + 1
+    after = dig(s, "pageInfo", "endCursor")
+    if not dig(s, "pageInfo", "hasNextPage") or not after:
+      return counts
 
 
 # why: fewest open review requests first; ties go alphabetically so the order is stable between opens.
@@ -844,8 +867,9 @@ def demo_gql(query, **v):
       "membersWithRole": {"totalCount": len(names), "nodes": [{"login": n, "name": None, "avatarUrl": None} for n in names]},
       "teams": {"nodes": [{"members": {"nodes": [{"login": n} for n in names if n != "acme-deploy"]}}] if v["org"] == "acme" else []},
     }}
-  load = {"diego-m": 4, "priya-k": 3, "tom-h": 3, "yuki-s": 1, "sam-r": 2, "lee-w": 0}
-  return {f"u{i}": {"issueCount": load.get(l, 0)} for i, l in re.findall(r"u(\d+): search\(.*?review-requested:([\w-]+)", query)}
+  load = {"acme": {"diego-m": 4, "priya-k": 3, "tom-h": 3, "yuki-s": 1}, "octo-labs": {"sam-r": 2, "lee-w": 0}}[v["search"].rsplit(":", 1)[1]]
+  prs = [{"reviewRequests": {"nodes": [{"requestedReviewer": {"login": l}}]}} for l, n in load.items() for _ in range(n)]
+  return {"search": {"issueCount": len(prs), "pageInfo": {"hasNextPage": False}, "nodes": prs}}
 
 
 def org_load(gql, org):
@@ -856,18 +880,12 @@ def org_load(gql, org):
     raise RuntimeError(f"GitHub didn't return the members and teams of {org} (SAML SSO or no access?)")
   team = o["membersWithRole"]
   # why: members in no team are service accounts and bots; an org without teams keeps everyone.
-  in_team = {m.get("login") for t in nodes(o, "teams") for m in nodes(t, "members")}
+  teams = {t.get("slug"): [m.get("login") for m in nodes(t, "members")] for t in nodes(o, "teams")}
+  in_team = {m for ms in teams.values() for m in ms}
   members = [{"login": m["login"], "name": m.get("name"), "avatar": m.get("avatarUrl")}
              for m in team.get("nodes") or [] if m and USER.fullmatch(m.get("login") or "") and (not in_team or m["login"] in in_team)]
   total = team.get("totalCount") or len(members)
-  counts = {}
-  if total <= REVIEWERS_MAX and members:
-    got = gql(load_query(org, [m["login"] for m in members]))
-    counts = {m["login"]: dig(got, f"u{i}", "issueCount") for i, m in enumerate(members)}
-    # why: a failed search would read as 0 and make that person the recommendation.
-    missing = [k for k, n in counts.items() if not isinstance(n, int)]
-    if missing:
-      raise RuntimeError(f"GitHub didn't return the review load of {', '.join(missing)}")
+  counts = review_load(gql, org, teams) if total <= REVIEWERS_MAX and members else {}
   return {"members": members, "counts": counts, "total": total}
 
 
@@ -1305,16 +1323,23 @@ def selftest():
     if q == ORGS_QUERY:
       return {"viewer": {"organizations": {"nodes": [{"login": "zeta"}, {"login": "acme"}, {"login": "solo"}, {"login": "Beta"}]}}}
     if q == MEMBERS_QUERY:
-      teams = [{"members": {"nodes": [{"login": "me"}, {"login": "a"}]}}, {"members": {"nodes": [{"login": "b"}, {"login": "c"}]}}]
+      teams = [{"slug": "t1", "members": {"nodes": [{"login": "me"}, {"login": "a"}]}},
+               {"slug": "t2", "members": {"nodes": [{"login": "b"}, {"login": "c"}]}}]
       return {"organization": {
         "membersWithRole": {"totalCount": {"acme": 5, "solo": 2}.get(v["org"], REVIEWERS_MAX + 1),
                             "nodes": [{"login": x} for x in ("me", "b", "a", "bot", "c", "bad login")]},
         "teams": {"nodes": teams if v["org"] == "acme" else []},
       }}
-    if "org:solo" in q:
-      return {f"u{i}": {"issueCount": 0} for i in range(10)}
-    assert '"is:pr is:open archived:false org:acme review-requested:a"' in q and "review-requested:bot" not in q
-    return {"u0": {"issueCount": 9}, "u1": {"issueCount": 4}, "u2": {"issueCount": 3}, "u3": {"issueCount": 3}}
+    assert q == LOAD_QUERY and v["search"] in ("is:pr is:open archived:false org:acme", "is:pr is:open archived:false org:solo"), v
+    if v["search"].endswith(":solo"):
+      return {"search": {"issueCount": 0, "pageInfo": {"hasNextPage": False}, "nodes": []}}
+    # two pages; a team request counts for each member, once per PR even when also asked directly.
+    req = lambda *who: {"reviewRequests": {"nodes": [{"requestedReviewer": {"slug": w[1:]} if w[0] == "@" else {"login": w}} for w in who]}}
+    if "after" not in v:
+      return {"search": {"issueCount": 7, "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
+                         "nodes": [req("@t2", "b"), req("@t1"), req("a", "c"), None, {}]}}
+    assert v["after"] == "c1"
+    return {"search": {"issueCount": 7, "pageInfo": {"hasNextPage": False}, "nodes": [req("b", "bot"), req("b", "a", "c"), req("b", "me")]}}
   g["graphql"] = fake_gql
   _reviewers.clear()
   r = reviewers("zeta", "acme", "me")
@@ -1339,12 +1364,17 @@ def selftest():
     if q == MEMBERS_QUERY:
       o = fake_gql(q, **v)["organization"]
       return {"organization": {"zeta": None, "solo": {**o, "teams": None}, "Beta": {**o, "membersWithRole": None}}.get(v["org"], o)}
-    return {"u1": {"issueCount": 4}}
+    return {"search": None}
   g["graphql"] = broken
-  for o, msg in (("zeta", "members and teams of zeta"), ("solo", "of solo"), ("Beta", "of Beta"), ("acme", "review load of me, a, c")):
+  for o, msg in (("zeta", "members and teams of zeta"), ("solo", "of solo"), ("Beta", "of Beta"), ("acme", "open PRs of acme")):
     e = reviewers(o, None, "me")
     assert e["org"] == o and e["orgs"] == ["acme", "Beta", "solo", "zeta"] and msg in e["error"] and e["members"] == [], e
   assert all(k[1] is None for k in _reviewers)
+  try:
+    review_load(lambda q, **v: {"search": {"issueCount": LOAD_MAX + 1, "nodes": []}}, "huge", {})
+    assert False
+  except RuntimeError as e:
+    assert "over 1000 open PRs" in str(e)
   g["graphql"], g["DEMO"] = saved["graphql"], True
   _reviewers.clear()
   assert [m["login"] for m in reviewers(None, "octo-labs", "crow-demo")["members"]] == ["lee-w", "sam-r"]
